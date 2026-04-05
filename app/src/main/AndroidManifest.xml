@@ -27,6 +27,16 @@
             android:exported="false"
             android:label="Analytical Processing"
             android:theme="@style/Theme.OpticalcontentExtractor" />
+        <activity
+            android:name=".RetouchActivity"
+            android:exported="false"
+            android:label="Manual Retouch"
+            android:theme="@style/Theme.OpticalcontentExtractor" />
+        <activity
+            android:name=".GradientExtractionActivity"
+            android:exported="false"
+            android:label="Gradient Extraction"
+            android:theme="@style/Theme.OpticalcontentExtractor" />
     </application>
 
 </manifest>

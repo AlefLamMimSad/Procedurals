@@ -1,6 +1,7 @@
 package zar.masih.opticalcontentextractor
 
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
@@ -31,6 +32,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import zar.masih.opticalcontentextractor.ui.theme.OpticalcontentExtractorTheme
+import java.io.File
+import java.io.FileOutputStream
 
 data class ProcessingPreset(val id: String, val threshold: Int, val kernelSize: Int)
 
@@ -117,7 +120,6 @@ fun ProcessingScreen(source: Bitmap, modifier: Modifier = Modifier) {
                             kernelSize = kernelSize.toInt()
                         )
                         favorites.add(newPreset)
-                        // Save to Prefs
                         val set = favorites.map { "${it.id}|${it.threshold}|${it.kernelSize}" }.toSet()
                         prefs.edit().putStringSet("favorite_list", set).apply()
                     }
@@ -141,6 +143,23 @@ fun ProcessingScreen(source: Bitmap, modifier: Modifier = Modifier) {
 
         Text("Kernel Size: ${kernelSize.toInt()}")
         Slider(value = kernelSize, onValueChange = { kernelSize = it }, valueRange = 1f..15f)
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        processedBitmap?.let { bitmap ->
+            Button(
+                onClick = {
+                    val path = saveBitmapToCache(context, bitmap)
+                    val intent = Intent(context, RetouchActivity::class.java).apply {
+                        putExtra("IMAGE_PATH", path)
+                    }
+                    context.startActivity(intent)
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Proceed to Manual Retouch")
+            }
+        }
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -175,6 +194,14 @@ fun PresetItem(preset: ProcessingPreset, onClick: (ProcessingPreset) -> Unit) {
             Text("K:${preset.kernelSize}", style = MaterialTheme.typography.bodySmall)
         }
     }
+}
+
+fun saveBitmapToCache(context: Context, bitmap: Bitmap): String {
+    val file = File(context.cacheDir, "processed_image.png")
+    FileOutputStream(file).use { out ->
+        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+    }
+    return file.absolutePath
 }
 
 suspend fun applyAnalyticalDewatermark(source: Bitmap, threshold: Int, kernelSize: Int): Bitmap = withContext(Dispatchers.Default) {
