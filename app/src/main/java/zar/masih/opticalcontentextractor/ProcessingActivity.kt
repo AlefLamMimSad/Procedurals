@@ -1,5 +1,6 @@
 package zar.masih.opticalcontentextractor
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
@@ -7,36 +8,31 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import zar.masih.opticalcontentextractor.ui.theme.OpticalcontentExtractorTheme
+
+data class ProcessingPreset(val id: String, val threshold: Int, val kernelSize: Int)
 
 class ProcessingActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -60,17 +56,32 @@ class ProcessingActivity : ComponentActivity() {
 
 @Composable
 fun ProcessingScreen(source: Bitmap, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("presets", Context.MODE_PRIVATE) }
+    
     var kernelSize by remember { mutableFloatStateOf(3f) }
     var contrastThreshold by remember { mutableFloatStateOf(180f) }
     var processedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var isProcessing by remember { mutableStateOf(false) }
+    
+    // Favorites State
+    val favorites = remember { mutableStateListOf<ProcessingPreset>() }
+    
+    // Load Favorites
+    LaunchedEffect(Unit) {
+        val saved = prefs.getStringSet("favorite_list", emptySet()) ?: emptySet()
+        saved.forEach { str ->
+            val parts = str.split("|")
+            if (parts.size == 3) {
+                favorites.add(ProcessingPreset(parts[0], parts[1].toInt(), parts[2].toInt()))
+            }
+        }
+    }
 
-    // Use LaunchedEffect with debounce to prevent over-processing and lag
+    // Processing Logic with Debounce
     LaunchedEffect(kernelSize, contrastThreshold) {
         isProcessing = true
-        // Debounce: Wait for slider to stop moving for a short duration
         delay(300) 
-        
         val result = withContext(Dispatchers.Default) {
             applyAnalyticalDewatermark(source, contrastThreshold.toInt(), kernelSize.toInt())
         }
@@ -84,23 +95,52 @@ fun ProcessingScreen(source: Bitmap, modifier: Modifier = Modifier) {
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text("Analytical Data Cleaning (Dewatermarking)", style = MaterialTheme.typography.titleLarge)
+        Text("Analytical Data Cleaning", style = MaterialTheme.typography.titleLarge)
         
         Spacer(modifier = Modifier.height(16.dp))
 
-        Text("Contrast Threshold (Watermark Target): ${contrastThreshold.toInt()}")
-        Slider(
-            value = contrastThreshold, 
-            onValueChange = { contrastThreshold = it }, 
-            valueRange = 0f..255f
-        )
+        // Favorite Selections Bar
+        Text("Favorite Selections", style = MaterialTheme.typography.labelLarge)
+        LazyRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            item {
+                OutlinedIconButton(
+                    onClick = {
+                        val newPreset = ProcessingPreset(
+                            id = System.currentTimeMillis().toString(),
+                            threshold = contrastThreshold.toInt(),
+                            kernelSize = kernelSize.toInt()
+                        )
+                        favorites.add(newPreset)
+                        // Save to Prefs
+                        val set = favorites.map { "${it.id}|${it.threshold}|${it.kernelSize}" }.toSet()
+                        prefs.edit().putStringSet("favorite_list", set).apply()
+                    }
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Save Current")
+                }
+            }
+            
+            items(favorites) { preset ->
+                PresetItem(preset) {
+                    contrastThreshold = it.threshold.toFloat()
+                    kernelSize = it.kernelSize.toFloat()
+                }
+            }
+        }
 
-        Text("Kernel Size (Reconstruction Area): ${kernelSize.toInt()}")
-        Slider(
-            value = kernelSize, 
-            onValueChange = { kernelSize = it }, 
-            valueRange = 1f..15f
-        )
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text("Contrast Threshold: ${contrastThreshold.toInt()}")
+        Slider(value = contrastThreshold, onValueChange = { contrastThreshold = it }, valueRange = 0f..255f)
+
+        Text("Kernel Size: ${kernelSize.toInt()}")
+        Slider(value = kernelSize, onValueChange = { kernelSize = it }, valueRange = 1f..15f)
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -115,19 +155,28 @@ fun ProcessingScreen(source: Bitmap, modifier: Modifier = Modifier) {
             }
             
             if (isProcessing) {
-                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                CircularProgressIndicator()
             }
         }
     }
 }
 
-/**
- * Enhanced Analytical Dewatermarking Algorithm
- * Based on research: Detection -> Segmentation -> Inpainting (Background Reconstruction)
- * 1. Pixel Intensity Analysis: Segment pixels likely to be watermark (mid-tone light colors).
- * 2. Background Estimation: For segmented pixels, use a sliding window (kernel) to 
- *    procedurally reconstruct the missing document data using weighted neighboring pixels.
- */
+@Composable
+fun PresetItem(preset: ProcessingPreset, onClick: (ProcessingPreset) -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.secondaryContainer)
+            .clickable { onClick(preset) }
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("T:${preset.threshold}", style = MaterialTheme.typography.bodySmall)
+            Text("K:${preset.kernelSize}", style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
 suspend fun applyAnalyticalDewatermark(source: Bitmap, threshold: Int, kernelSize: Int): Bitmap = withContext(Dispatchers.Default) {
     val width = source.width
     val height = source.height
@@ -137,25 +186,16 @@ suspend fun applyAnalyticalDewatermark(source: Bitmap, threshold: Int, kernelSiz
     val outputPixels = IntArray(pixels.size)
     val halfKernel = kernelSize / 2
 
-    // Performance optimization: Using a direct loop with bit-shifting
     for (y in 0 until height) {
         for (x in 0 until width) {
             val idx = y * width + x
             val color = pixels[idx]
-            
-            // Extract components manually for speed
             val r = (color shr 16) and 0xFF
             val g = (color shr 8) and 0xFF
             val b = color and 0xFF
-            
             val intensity = (r + g + b) / 3
 
-            // Research-based Segmentation: 
-            // Most watermarks reside in the light-gray/mid-tone spectrum.
-            // We select pixels brighter than the threshold (which excludes text/ink).
             if (intensity > threshold) {
-                // Procedural Reconstruction Layer:
-                // We emulate an analytical 'Inpainting' kernel.
                 var rSum = 0L
                 var gSum = 0L
                 var bSum = 0L
@@ -164,7 +204,6 @@ suspend fun applyAnalyticalDewatermark(source: Bitmap, threshold: Int, kernelSiz
                 for (ky in -halfKernel..halfKernel) {
                     val ny = y + ky
                     if (ny !in 0 until height) continue
-                    
                     for (kx in -halfKernel..halfKernel) {
                         val nx = x + kx
                         if (nx in 0 until width) {
@@ -172,9 +211,6 @@ suspend fun applyAnalyticalDewatermark(source: Bitmap, threshold: Int, kernelSiz
                             val nr = (nColor shr 16) and 0xFF
                             val ng = (nColor shr 8) and 0xFF
                             val nb = nColor and 0xFF
-                            
-                            // Only use neighbors that are NOT part of the detected watermark
-                            // to avoid blurring the noise itself into the output.
                             if ((nr + ng + nb) / 3 <= threshold) {
                                 rSum += nr
                                 gSum += ng
@@ -191,11 +227,9 @@ suspend fun applyAnalyticalDewatermark(source: Bitmap, threshold: Int, kernelSiz
                                        ((gSum / count).toInt() shl 8) or 
                                        (bSum / count).toInt()
                 } else {
-                    // Fallback: If no document neighbors found, push to white
                     outputPixels[idx] = Color.WHITE
                 }
             } else {
-                // Keep the document content (ink/text)
                 outputPixels[idx] = color
             }
         }
