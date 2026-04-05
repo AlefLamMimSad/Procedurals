@@ -86,7 +86,13 @@ fun DocumentScannerScreen(modifier: Modifier = Modifier) {
                 val bitmap = loadBitmapFromUri(context, uri)
                 originalBitmap = bitmap
                 bitmap?.let {
-                    val proc = applyProceduralChain(it, model.layer1Config.darkThreshold)
+                    // Layer 1 (Neural Masking)
+                    val layer1Config = model.getLayer(1) as LayerConfig.NeuralMaskLayer
+                    val proc = if (layer1Config.isEnabled) {
+                        applyProceduralChain(it, layer1Config.darkThreshold)
+                    } else {
+                        it
+                    }
                     processedBitmap = proc
                     imagePath = saveBitmapToFile(context, proc)
                 }
@@ -101,13 +107,18 @@ fun DocumentScannerScreen(modifier: Modifier = Modifier) {
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        // Model Summary for Visualizing Sequential Pipeline
+        ModelSummaryHeader(model, currentLayerIndex = 0)
+        
+        Spacer(modifier = Modifier.height(16.dp))
+
         Button(onClick = {
             scanner.getStartScanIntent(context as ComponentActivity)
                 .addOnSuccessListener { intentSender ->
                     scannerLauncher.launch(IntentSenderRequest.Builder(intentSender).build())
                 }
         }) {
-            Text("Scan & Birds-Eye Selection")
+            Text("Input Layer: Scan Document")
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -120,15 +131,15 @@ fun DocumentScannerScreen(modifier: Modifier = Modifier) {
                 }
                 context.startActivity(intent)
             }) {
-                Text("Go to Analytical Cleaning")
+                Text("Forward Pass -> Layer 2")
             }
         }
 
         processedBitmap?.let {
-            Text("Layer 1 (Neural Masking) Output", style = MaterialTheme.typography.titleMedium)
+            Text("Sequential Pipeline Output", style = MaterialTheme.typography.titleMedium)
             Image(
                 bitmap = it.asImageBitmap(),
-                contentDescription = "Processed Image",
+                contentDescription = "Output",
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(300.dp),

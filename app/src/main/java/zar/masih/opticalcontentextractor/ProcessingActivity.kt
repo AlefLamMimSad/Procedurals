@@ -4,7 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Color
+import android.graphics.Color as AndroidColor
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -13,20 +13,23 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -34,8 +37,6 @@ import kotlinx.coroutines.withContext
 import zar.masih.opticalcontentextractor.ui.theme.OpticalcontentExtractorTheme
 import java.io.File
 import java.io.FileOutputStream
-
-data class ProcessingPreset(val id: String, val threshold: Int, val kernelSize: Int)
 
 class ProcessingActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -61,28 +62,28 @@ class ProcessingActivity : ComponentActivity() {
 @Composable
 fun ProcessingScreen(source: Bitmap, initialModel: ModelArchitecture, modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    val prefs = remember { context.getSharedPreferences("presets", Context.MODE_PRIVATE) }
-    
     var model by remember { mutableStateOf(initialModel) }
     
-    var kernelSize by remember { mutableFloatStateOf(model.layer2Config.kernelSize.toFloat()) }
-    var contrastThreshold by remember { mutableFloatStateOf(model.layer2Config.contrastThreshold.toFloat()) }
+    // Layer 2 specific state
+    val layerIndex = 2
+    val config = model.getLayer(layerIndex) as LayerConfig.AnalyticalCleanLayer
+    
+    var kernelSize by remember { mutableFloatStateOf(config.kernelSize.toFloat()) }
+    var contrastThreshold by remember { mutableFloatStateOf(config.contrastThreshold.toFloat()) }
+    var isLayerEnabled by remember { mutableStateOf(config.isEnabled) }
+    
     var processedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var isProcessing by remember { mutableStateOf(false) }
-    
-    val favorites = remember { mutableStateListOf<ProcessingPreset>() }
-    
-    LaunchedEffect(Unit) {
-        val saved = prefs.getStringSet("favorite_list", emptySet()) ?: emptySet()
-        saved.forEach { str ->
-            val parts = str.split("|")
-            if (parts.size == 3) {
-                favorites.add(ProcessingPreset(parts[0], parts[1].toInt(), parts[2].toInt()))
-            }
-        }
-    }
 
-    LaunchedEffect(kernelSize, contrastThreshold) {
+    // Sequential NN Model Summary Header
+    ModelSummaryHeader(model, currentLayerIndex = layerIndex)
+
+    LaunchedEffect(kernelSize, contrastThreshold, isLayerEnabled) {
+        if (!isLayerEnabled) {
+            processedBitmap = source
+            return@LaunchedEffect
+        }
+        
         isProcessing = true
         delay(300) 
         val result = withContext(Dispatchers.Default) {
@@ -90,8 +91,13 @@ fun ProcessingScreen(source: Bitmap, initialModel: ModelArchitecture, modifier: 
         }
         processedBitmap = result
         isProcessing = false
-        // Update model checkpoint
-        model = model.copy(layer2Config = Layer2Config(contrastThreshold.toInt(), kernelSize.toInt()))
+        
+        // Update Layer Checkpoint
+        model = model.updateLayer(layerIndex, config.copy(
+            isEnabled = isLayerEnabled,
+            contrastThreshold = contrastThreshold.toInt(),
+            kernelSize = kernelSize.toInt()
+        ))
     }
 
     Column(
@@ -100,50 +106,23 @@ fun ProcessingScreen(source: Bitmap, initialModel: ModelArchitecture, modifier: 
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text("Layer 2: Analytical Cleaning", style = MaterialTheme.typography.titleLarge)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Layer $layerIndex: ${config.layerName}", style = MaterialTheme.typography.titleLarge)
+            Spacer(modifier = Modifier.weight(1f))
+            Switch(checked = isLayerEnabled, onCheckedChange = { isLayerEnabled = it })
+        }
         
         Spacer(modifier = Modifier.height(16.dp))
 
-        Text("Favorite Selections", style = MaterialTheme.typography.labelLarge)
-        LazyRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            item {
-                OutlinedIconButton(
-                    onClick = {
-                        val newPreset = ProcessingPreset(
-                            id = System.currentTimeMillis().toString(),
-                            threshold = contrastThreshold.toInt(),
-                            kernelSize = kernelSize.toInt()
-                        )
-                        favorites.add(newPreset)
-                        val set = favorites.map { "${it.id}|${it.threshold}|${it.kernelSize}" }.toSet()
-                        prefs.edit().putStringSet("favorite_list", set).apply()
-                    }
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = "Save Current")
-                }
-            }
-            
-            items(favorites) { preset ->
-                PresetItem(preset) {
-                    contrastThreshold = it.threshold.toFloat()
-                    kernelSize = it.kernelSize.toFloat()
-                }
-            }
+        if (isLayerEnabled) {
+            Text("Contrast Threshold: ${contrastThreshold.toInt()}")
+            Slider(value = contrastThreshold, onValueChange = { contrastThreshold = it }, valueRange = 0f..255f)
+
+            Text("Kernel Size: ${kernelSize.toInt()}")
+            Slider(value = kernelSize, onValueChange = { kernelSize = it }, valueRange = 1f..15f)
+        } else {
+            Text("Layer Bypassed (Identity Transformation)", color = MaterialTheme.colorScheme.error)
         }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text("Contrast Threshold: ${contrastThreshold.toInt()}")
-        Slider(value = contrastThreshold, onValueChange = { contrastThreshold = it }, valueRange = 0f..255f)
-
-        Text("Kernel Size: ${kernelSize.toInt()}")
-        Slider(value = kernelSize, onValueChange = { kernelSize = it }, valueRange = 1f..15f)
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -159,7 +138,7 @@ fun ProcessingScreen(source: Bitmap, initialModel: ModelArchitecture, modifier: 
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Proceed to Layer 3 (Manual Retouch)")
+                Text("Forward Pass -> Layer 3")
             }
         }
 
@@ -169,31 +148,55 @@ fun ProcessingScreen(source: Bitmap, initialModel: ModelArchitecture, modifier: 
             processedBitmap?.let {
                 Image(
                     bitmap = it.asImageBitmap(),
-                    contentDescription = "Processed",
+                    contentDescription = "Layer Output",
                     modifier = Modifier.fillMaxWidth(),
                     contentScale = ContentScale.Fit
                 )
             }
-            
-            if (isProcessing) {
-                CircularProgressIndicator()
-            }
+            if (isProcessing) CircularProgressIndicator()
         }
     }
 }
 
 @Composable
-fun PresetItem(preset: ProcessingPreset, onClick: (ProcessingPreset) -> Unit) {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.secondaryContainer)
-            .clickable { onClick(preset) }
-            .padding(horizontal = 12.dp, vertical = 8.dp)
+fun ModelSummaryHeader(model: ModelArchitecture, currentLayerIndex: Int) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("T:${preset.threshold}", style = MaterialTheme.typography.bodySmall)
-            Text("K:${preset.kernelSize}", style = MaterialTheme.typography.bodySmall)
+        Column(modifier = Modifier.padding(8.dp)) {
+            Text("Sequential Model Summary", style = MaterialTheme.typography.labelMedium)
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                itemsIndexed(model.layers) { index, layer ->
+                    val isActive = index == currentLayerIndex
+                    val isTuned = index < currentLayerIndex
+                    
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(
+                                    if (isActive) MaterialTheme.colorScheme.primary 
+                                    else if (isTuned) MaterialTheme.colorScheme.secondary 
+                                    else MaterialTheme.colorScheme.outline
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isTuned) Icon(Icons.Default.CheckCircle, "", tint = ComposeColor.White, modifier = Modifier.size(16.dp))
+                            else Text("${index}", color = ComposeColor.White, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text(
+                            layer.layerName.split(" ")[0], 
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
+                        )
+                    }
+                    if (index < model.layers.size - 1) {
+                        Text("→", modifier = Modifier.padding(top = 8.dp))
+                    }
+                }
+            }
         }
     }
 }
@@ -256,7 +259,7 @@ suspend fun applyAnalyticalDewatermark(source: Bitmap, threshold: Int, kernelSiz
                                        ((gSum / count).toInt() shl 8) or 
                                        (bSum / count).toInt()
                 } else {
-                    outputPixels[idx] = Color.WHITE
+                    outputPixels[idx] = AndroidColor.WHITE
                 }
             } else {
                 outputPixels[idx] = color
