@@ -1,6 +1,7 @@
 package zar.masih.opticalcontentextractor
 
 import android.app.Activity
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
@@ -42,6 +43,8 @@ import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions.SCANNER
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import zar.masih.opticalcontentextractor.ui.theme.OpticalcontentExtractorTheme
+import java.io.File
+import java.io.FileOutputStream
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -62,11 +65,13 @@ fun DocumentScannerScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     var originalBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var processedBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var imagePath by remember { mutableStateOf<String?>(null) }
 
     val options = GmsDocumentScannerOptions.Builder()
         .setGalleryImportAllowed(true)
         .setResultFormats(RESULT_FORMAT_JPEG)
         .setScannerMode(SCANNER_MODE_FULL)
+        .setPageLimit(1)
         .build()
 
     val scanner = GmsDocumentScanning.getClient(options)
@@ -80,7 +85,10 @@ fun DocumentScannerScreen(modifier: Modifier = Modifier) {
                 val bitmap = loadBitmapFromUri(context, uri)
                 originalBitmap = bitmap
                 bitmap?.let {
-                    processedBitmap = applyProceduralChain(it)
+                    val proc = applyProceduralChain(it)
+                    processedBitmap = proc
+                    // Save processed image to pass to next activity
+                    imagePath = saveBitmapToFile(context, proc)
                 }
             }
         }
@@ -99,78 +107,65 @@ fun DocumentScannerScreen(modifier: Modifier = Modifier) {
                     scannerLauncher.launch(IntentSenderRequest.Builder(intentSender).build())
                 }
         }) {
-            Text("Scan Document")
+            Text("Scan & Birds-Eye Selection")
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        imagePath?.let { path ->
+            Button(onClick = {
+                val intent = Intent(context, ProcessingActivity::class.java).apply {
+                    putExtra("IMAGE_PATH", path)
+                }
+                context.startActivity(intent)
+            }) {
+                Text("Go to Analytical Cleaning")
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
         processedBitmap?.let {
-            Text("Processed Result (Birds-Eye + Neural Chain)", style = MaterialTheme.typography.titleMedium)
+            Text("Layer 1: Neural Chain Preview", style = MaterialTheme.typography.titleMedium)
             Image(
                 bitmap = it.asImageBitmap(),
                 contentDescription = "Processed Image",
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(400.dp),
-                contentScale = ContentScale.Fit
-            )
-        }
-
-        originalBitmap?.let {
-            Spacer(modifier = Modifier.height(16.dp))
-            Text("Original Scan", style = MaterialTheme.typography.titleSmall)
-            Image(
-                bitmap = it.asImageBitmap(),
-                contentDescription = "Original Image",
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(200.dp),
+                    .height(300.dp),
                 contentScale = ContentScale.Fit
             )
         }
     }
 }
 
-/**
- * Procedural chain operations:
- * 1. detect where it is black (contrast.min)
- * 2. mask the black parts
- * 3. apply mask to select important pixels (dominant lighting focus)
- * 4. keep selected parts, make everything else white
- */
 fun applyProceduralChain(source: Bitmap, darkThreshold: Int = 80): Bitmap {
     val width = source.width
     val height = source.height
     val pixels = IntArray(width * height)
     source.getPixels(pixels, 0, width, 0, 0, width, height)
 
-    // Layer 1: Detection & Masking
-    // We create a boolean mask where 'true' means "important" (not black)
     val importantMask = BooleanArray(pixels.size) { i ->
         val color = pixels[i]
-        val r = Color.red(color)
-        val g = Color.green(color)
-        val b = Color.blue(color)
-        
-        // Simple luminance/intensity check to detect "black" parts
-        val intensity = (r + g + b) / 3
-        intensity > darkThreshold // If it's brighter than threshold, it's considered "important"
+        val intensity = (Color.red(color) + Color.green(color) + Color.blue(color)) / 3
+        intensity > darkThreshold
     }
 
-    // Layer 2: Transformation & Output Generation
     val outputPixels = IntArray(pixels.size) { i ->
-        if (importantMask[i]) {
-            // Keep original pixel if it was selected by the mask
-            pixels[i]
-        } else {
-            // Make everything else white (procedural default)
-            Color.WHITE
-        }
+        if (importantMask[i]) pixels[i] else Color.WHITE
     }
 
     val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     result.setPixels(outputPixels, 0, width, 0, 0, width, height)
     return result
+}
+
+fun saveBitmapToFile(context: android.content.Context, bitmap: Bitmap): String {
+    val file = File(context.cacheDir, "scanned_image.png")
+    FileOutputStream(file).use { out ->
+        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+    }
+    return file.absolutePath
 }
 
 fun loadBitmapFromUri(context: android.content.Context, uri: Uri): Bitmap? {
