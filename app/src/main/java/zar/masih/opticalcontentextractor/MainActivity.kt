@@ -1,5 +1,6 @@
 package zar.masih.opticalcontentextractor
 
+import android.app.Activity
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
@@ -73,7 +74,7 @@ fun DocumentScannerScreen(modifier: Modifier = Modifier) {
     val scannerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
-        if (result.resultCode == ComponentActivity.RESULT_OK) {
+        if (result.resultCode == Activity.RESULT_OK) {
             val scanResult = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
             scanResult?.pages?.firstOrNull()?.imageUri?.let { uri ->
                 val bitmap = loadBitmapFromUri(context, uri)
@@ -176,7 +177,7 @@ fun loadBitmapFromUri(context: android.content.Context, uri: Uri): Bitmap? {
     return try {
         val inputStream = context.contentResolver.openInputStream(uri)
         BitmapFactory.decodeStream(inputStream)
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         null
     }
 }
