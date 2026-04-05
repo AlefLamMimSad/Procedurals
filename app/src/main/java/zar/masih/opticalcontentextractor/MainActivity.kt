@@ -63,6 +63,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun DocumentScannerScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    var model by remember { mutableStateOf(ModelArchitecture()) }
     var originalBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var processedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var imagePath by remember { mutableStateOf<String?>(null) }
@@ -85,9 +86,8 @@ fun DocumentScannerScreen(modifier: Modifier = Modifier) {
                 val bitmap = loadBitmapFromUri(context, uri)
                 originalBitmap = bitmap
                 bitmap?.let {
-                    val proc = applyProceduralChain(it)
+                    val proc = applyProceduralChain(it, model.layer1Config.darkThreshold)
                     processedBitmap = proc
-                    // Save processed image to pass to next activity
                     imagePath = saveBitmapToFile(context, proc)
                 }
             }
@@ -116,6 +116,7 @@ fun DocumentScannerScreen(modifier: Modifier = Modifier) {
             Button(onClick = {
                 val intent = Intent(context, ProcessingActivity::class.java).apply {
                     putExtra("IMAGE_PATH", path)
+                    putExtra("MODEL_CONFIG", model)
                 }
                 context.startActivity(intent)
             }) {
@@ -123,10 +124,8 @@ fun DocumentScannerScreen(modifier: Modifier = Modifier) {
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
         processedBitmap?.let {
-            Text("Layer 1: Neural Chain Preview", style = MaterialTheme.typography.titleMedium)
+            Text("Layer 1 (Neural Masking) Output", style = MaterialTheme.typography.titleMedium)
             Image(
                 bitmap = it.asImageBitmap(),
                 contentDescription = "Processed Image",
@@ -139,7 +138,7 @@ fun DocumentScannerScreen(modifier: Modifier = Modifier) {
     }
 }
 
-fun applyProceduralChain(source: Bitmap, darkThreshold: Int = 80): Bitmap {
+fun applyProceduralChain(source: Bitmap, darkThreshold: Int): Bitmap {
     val width = source.width
     val height = source.height
     val pixels = IntArray(width * height)

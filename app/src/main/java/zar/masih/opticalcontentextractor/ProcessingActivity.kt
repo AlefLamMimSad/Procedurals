@@ -42,12 +42,13 @@ class ProcessingActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val imagePath = intent.getStringExtra("IMAGE_PATH")
         val bitmap = imagePath?.let { BitmapFactory.decodeFile(it) }
+        val modelConfig = intent.getParcelableExtra<ModelArchitecture>("MODEL_CONFIG") ?: ModelArchitecture()
 
         setContent {
             OpticalcontentExtractorTheme {
                 Scaffold { padding ->
                     if (bitmap != null) {
-                        ProcessingScreen(bitmap, Modifier.padding(padding))
+                        ProcessingScreen(bitmap, modelConfig, Modifier.padding(padding))
                     } else {
                         Text("No image found", modifier = Modifier.padding(padding))
                     }
@@ -58,19 +59,19 @@ class ProcessingActivity : ComponentActivity() {
 }
 
 @Composable
-fun ProcessingScreen(source: Bitmap, modifier: Modifier = Modifier) {
+fun ProcessingScreen(source: Bitmap, initialModel: ModelArchitecture, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("presets", Context.MODE_PRIVATE) }
     
-    var kernelSize by remember { mutableFloatStateOf(3f) }
-    var contrastThreshold by remember { mutableFloatStateOf(180f) }
+    var model by remember { mutableStateOf(initialModel) }
+    
+    var kernelSize by remember { mutableFloatStateOf(model.layer2Config.kernelSize.toFloat()) }
+    var contrastThreshold by remember { mutableFloatStateOf(model.layer2Config.contrastThreshold.toFloat()) }
     var processedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var isProcessing by remember { mutableStateOf(false) }
     
-    // Favorites State
     val favorites = remember { mutableStateListOf<ProcessingPreset>() }
     
-    // Load Favorites
     LaunchedEffect(Unit) {
         val saved = prefs.getStringSet("favorite_list", emptySet()) ?: emptySet()
         saved.forEach { str ->
@@ -81,7 +82,6 @@ fun ProcessingScreen(source: Bitmap, modifier: Modifier = Modifier) {
         }
     }
 
-    // Processing Logic with Debounce
     LaunchedEffect(kernelSize, contrastThreshold) {
         isProcessing = true
         delay(300) 
@@ -90,6 +90,8 @@ fun ProcessingScreen(source: Bitmap, modifier: Modifier = Modifier) {
         }
         processedBitmap = result
         isProcessing = false
+        // Update model checkpoint
+        model = model.copy(layer2Config = Layer2Config(contrastThreshold.toInt(), kernelSize.toInt()))
     }
 
     Column(
@@ -98,11 +100,10 @@ fun ProcessingScreen(source: Bitmap, modifier: Modifier = Modifier) {
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text("Analytical Data Cleaning", style = MaterialTheme.typography.titleLarge)
+        Text("Layer 2: Analytical Cleaning", style = MaterialTheme.typography.titleLarge)
         
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Favorite Selections Bar
         Text("Favorite Selections", style = MaterialTheme.typography.labelLarge)
         LazyRow(
             modifier = Modifier
@@ -152,12 +153,13 @@ fun ProcessingScreen(source: Bitmap, modifier: Modifier = Modifier) {
                     val path = saveBitmapToCache(context, bitmap)
                     val intent = Intent(context, RetouchActivity::class.java).apply {
                         putExtra("IMAGE_PATH", path)
+                        putExtra("MODEL_CONFIG", model)
                     }
                     context.startActivity(intent)
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Proceed to Manual Retouch")
+                Text("Proceed to Layer 3 (Manual Retouch)")
             }
         }
 
