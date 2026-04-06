@@ -52,6 +52,7 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.play.services.mlkit.document.scanner)
     implementation("com.google.code.gson:gson:2.11.0")
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.1")
     
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
