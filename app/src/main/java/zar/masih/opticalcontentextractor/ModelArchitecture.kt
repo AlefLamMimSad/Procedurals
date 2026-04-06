@@ -13,8 +13,9 @@ data class ModelArchitecture(
         LayerConfig.AnalyticalCleanLayer(),      // Index 2
         LayerConfig.ObjectRemovalLayer(layerName = "Intermittent Object Removal"), // Index 3
         LayerConfig.VisibilityMaskLayer(),       // Index 4
-        LayerConfig.GradientExtractLayer(),      // Index 5
-        LayerConfig.ObjectRemovalLayer(layerName = "Final Object Removal")        // Index 6
+        LayerConfig.DilationLayer(),             // Index 5 (Object Expansion)
+        LayerConfig.GradientExtractLayer(),      // Index 6
+        LayerConfig.ObjectRemovalLayer(layerName = "Final Object Removal")        // Index 7
     ),
     val checkpointPaths: Map<Int, String> = emptyMap()
 ) : Parcelable {
@@ -32,10 +33,6 @@ data class ModelArchitecture(
         return copy(checkpointPaths = newCheckpoints)
     }
 
-    /**
-     * Finds the most recent valid checkpoint path before the given index.
-     * Useful for skipping disabled layers.
-     */
     fun getLastValidPath(currentIndex: Int): String? {
         for (i in (currentIndex - 1) downTo 0) {
             val path = checkpointPaths[i]
@@ -109,11 +106,19 @@ sealed class LayerConfig : Parcelable {
     ) : LayerConfig()
 
     @Parcelize
+    data class DilationLayer(
+        override val isEnabled: Boolean = true,
+        override val layerName: String = "Object Expansion",
+        val radius: Int = 2
+    ) : LayerConfig()
+
+    @Parcelize
     data class GradientExtractLayer(
         override val isEnabled: Boolean = true,
         override val layerName: String = "Gradient Extraction",
         val amplification: Float = 2.0f,
-        val extractionThreshold: Int = 50
+        val extractionThreshold: Int = 50,
+        val expansionRadius: Int = 0 // Fixed: Added this parameter
     ) : LayerConfig()
 
     @Parcelize

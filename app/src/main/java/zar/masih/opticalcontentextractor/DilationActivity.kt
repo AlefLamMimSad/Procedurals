@@ -20,14 +20,13 @@ import kotlinx.coroutines.delay
 import zar.masih.opticalcontentextractor.ui.theme.ObjectHighlightColor
 import zar.masih.opticalcontentextractor.ui.theme.OpticalcontentExtractorTheme
 
-class GradientExtractionActivity : ComponentActivity() {
+class DilationActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val imagePath = intent.getStringExtra("IMAGE_PATH")
         val modelConfig = intent.getParcelableExtra<ModelArchitecture>("MODEL_CONFIG") ?: ModelArchitecture()
         
-        // Gradient Extraction is now at Layer 6 after adding Dilation at Layer 5
-        val layerIndex = 6
+        val layerIndex = 5
         val actualInputPath = imagePath ?: modelConfig.getLastValidPath(layerIndex)
         val bitmap = actualInputPath?.let { BitmapFactory.decodeFile(it) }
 
@@ -35,7 +34,7 @@ class GradientExtractionActivity : ComponentActivity() {
             OpticalcontentExtractorTheme {
                 Scaffold { padding ->
                     if (bitmap != null) {
-                        GradientExtractionScreen(bitmap, modelConfig, Modifier.padding(padding))
+                        DilationScreen(bitmap, modelConfig, Modifier.padding(padding))
                     } else {
                         Text("No image found", modifier = Modifier.padding(padding))
                     }
@@ -46,27 +45,23 @@ class GradientExtractionActivity : ComponentActivity() {
 }
 
 @Composable
-fun GradientExtractionScreen(source: Bitmap, initialModel: ModelArchitecture, modifier: Modifier = Modifier) {
+fun DilationScreen(source: Bitmap, initialModel: ModelArchitecture, modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    val layerIndex = 6
+    val layerIndex = 5
     var model by remember { mutableStateOf(initialModel) }
-    val config = model.getLayer(layerIndex) as LayerConfig.GradientExtractLayer
+    val config = model.getLayer(layerIndex) as LayerConfig.DilationLayer
     
-    var amplification by remember { mutableFloatStateOf(config.amplification) }
-    var extractionThreshold by remember { mutableFloatStateOf(config.extractionThreshold.toFloat()) }
-    var expansionRadius by remember { mutableIntStateOf(config.expansionRadius) }
+    var radius by remember { mutableIntStateOf(config.radius) }
     var isEnabled by remember { mutableStateOf(config.isEnabled) }
     
     val processingState by ProcessingEngine.processingState.collectAsState()
     val highlightColor = ObjectHighlightColor.toArgb()
 
-    LaunchedEffect(amplification, extractionThreshold, expansionRadius, isEnabled) {
+    LaunchedEffect(radius, isEnabled) {
         if (!isEnabled) return@LaunchedEffect
-        delay(150) // Debounce
+        delay(150)
         ProcessingEngine.requestProcessing(
-            ProcessingEngine.ProcessingTask.GradientExtraction(
-                source, amplification, extractionThreshold.toInt(), highlightColor, expansionRadius
-            )
+            ProcessingEngine.ProcessingTask.Dilation(source, radius, highlightColor)
         )
     }
 
@@ -88,26 +83,15 @@ fun GradientExtractionScreen(source: Bitmap, initialModel: ModelArchitecture, mo
         Spacer(modifier = Modifier.height(16.dp))
 
         if (isEnabled) {
-            Text("Gradient Amplification (Power): ${String.format("%.1f", amplification)}")
-            Slider(value = amplification, onValueChange = { amplification = it }, valueRange = 1f..10f)
-
-            Text("Extraction Sensitivity (Threshold): ${extractionThreshold.toInt()}")
-            Slider(value = extractionThreshold, onValueChange = { extractionThreshold = it }, valueRange = 0f..255f)
-
-            Text("Internal Expansion Radius: $expansionRadius")
+            Text("Expansion Radius: $radius")
             Slider(
-                value = expansionRadius.toFloat(), 
-                onValueChange = { expansionRadius = it.toInt() }, 
-                valueRange = 0f..10f,
+                value = radius.toFloat(),
+                onValueChange = { radius = it.toInt() },
+                valueRange = 1f..10f,
                 steps = 9
             )
         } else {
-            Box(
-                modifier = Modifier.fillMaxWidth().height(100.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("Layer Disabled - Input will be passed to next stage.", color = MaterialTheme.colorScheme.secondary)
-            }
+            Text("Layer Disabled - Input will be passed through.", color = MaterialTheme.colorScheme.secondary)
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -128,35 +112,23 @@ fun GradientExtractionScreen(source: Bitmap, initialModel: ModelArchitecture, mo
                     }
                 } else source
                 
-                val fileName = "checkpoint_layer6.png"
-                val path = if (isEnabled) {
-                    saveBitmap(context, currentBitmap, fileName)
-                } else {
-                    initialModel.getLastValidPath(layerIndex) ?: ""
-                }
+                val fileName = "checkpoint_layer5.png"
+                val path = if (isEnabled) saveBitmap(context, currentBitmap, fileName) else model.getLastValidPath(layerIndex) ?: ""
                 
-                val updatedConfig = config.copy(
-                    amplification = amplification,
-                    extractionThreshold = extractionThreshold.toInt(),
-                    expansionRadius = expansionRadius,
-                    isEnabled = isEnabled
-                )
+                val updatedModel = model.updateLayer(layerIndex, config.copy(radius = radius, isEnabled = isEnabled))
+                    .let { if (isEnabled) it.setCheckpoint(layerIndex, path) else it }
                 
-                val updatedModel = model.updateLayer(layerIndex, updatedConfig)
-                val finalModel = if (isEnabled) updatedModel.setCheckpoint(layerIndex, path) else updatedModel
-                
-                finalModel.saveAsDefaults(context)
+                updatedModel.saveAsDefaults(context)
 
-                val intent = Intent(context, ObjectRemovalActivity::class.java).apply {
+                val intent = Intent(context, GradientExtractionActivity::class.java).apply {
                     putExtra("IMAGE_PATH", path)
-                    putExtra("IS_FINAL_STEP", true)
-                    putExtra("MODEL_CONFIG", finalModel)
+                    putExtra("MODEL_CONFIG", updatedModel)
                 }
                 context.startActivity(intent)
             },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Confirm & Forward -> Layer 7")
+            Text("Forward Pass -> Layer 6 (Gradient)")
         }
     }
 }

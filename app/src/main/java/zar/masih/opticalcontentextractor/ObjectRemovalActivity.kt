@@ -25,8 +25,8 @@ class ObjectRemovalActivity : ComponentActivity() {
         val modelConfig = intent.getParcelableExtra<ModelArchitecture>("MODEL_CONFIG") ?: ModelArchitecture()
         val isFinalStep = intent.getBooleanExtra("IS_FINAL_STEP", false)
         
-        // If imagePath is null, try to recover from model checkpoints
-        val layerIndex = if (isFinalStep) 6 else 3
+        // Correct layer indexing: Layer 3 is Intermittent, Layer 7 is Final
+        val layerIndex = if (isFinalStep) 7 else 3
         val actualInputPath = imagePath ?: modelConfig.getLastValidPath(layerIndex)
         val bitmap = actualInputPath?.let { BitmapFactory.decodeFile(it) }
 
@@ -48,7 +48,7 @@ class ObjectRemovalActivity : ComponentActivity() {
 fun ObjectRemovalScreen(source: Bitmap, initialModel: ModelArchitecture, isFinalStep: Boolean, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     var model by remember { mutableStateOf(initialModel) }
-    val layerIndex = if (isFinalStep) 6 else 3
+    val layerIndex = if (isFinalStep) 7 else 3
     val config = model.getLayer(layerIndex) as LayerConfig.ObjectRemovalLayer
     
     var nToRemove by remember { mutableFloatStateOf(config.nToRemove.toFloat()) }
@@ -105,7 +105,7 @@ fun ObjectRemovalScreen(source: Bitmap, initialModel: ModelArchitecture, isFinal
                     }
                 } else source
                 
-                val fileName = if (isFinalStep) "checkpoint_layer6.png" else "checkpoint_layer3.png"
+                val fileName = if (isFinalStep) "checkpoint_layer7.png" else "checkpoint_layer3.png"
                 val path = if (isEnabled) saveBitmap(context, currentBitmap, fileName) else model.getLastValidPath(layerIndex) ?: ""
                 
                 val updatedConfig = config.copy(nToRemove = nToRemove.toInt(), isEnabled = isEnabled)

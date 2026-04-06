@@ -144,14 +144,15 @@ fun applyAnalyticalDewatermarkSync(source: Bitmap, threshold: Int, kernelSize: I
     return result
 }
 
-fun applyGradientExtractionSync(source: Bitmap, amp: Float, threshold: Int, highlightColor: Int): Bitmap {
+fun applyGradientExtractionSync(source: Bitmap, amp: Float, threshold: Int, highlightColor: Int, expansionRadius: Int): Bitmap {
     val width = source.width
     val height = source.height
     val pixels = IntArray(width * height)
     source.getPixels(pixels, 0, width, 0, 0, width, height)
     
-    val outputPixels = IntArray(pixels.size)
+    val gradientMask = BooleanArray(pixels.size)
 
+    // Stage 1: Gradient Detection
     for (y in 1 until height - 1) {
         for (x in 1 until width - 1) {
             val idx = y * width + x
@@ -167,12 +168,68 @@ fun applyGradientExtractionSync(source: Bitmap, amp: Float, threshold: Int, high
             val dy = getInten(pY1) - getInten(pY0)
             
             val magnitude = sqrt((dx * dx + dy * dy).toDouble()).toFloat()
-            val amplifiedMag = magnitude * amp
-            
-            if (amplifiedMag > threshold) {
-                outputPixels[idx] = highlightColor
-            } else {
-                outputPixels[idx] = Color.WHITE
+            if (magnitude * amp > threshold) {
+                gradientMask[idx] = true
+            }
+        }
+    }
+
+    // Stage 2: Morphological Dilation (The "Buffering Effect")
+    val outputPixels = IntArray(pixels.size) { Color.WHITE }
+    if (expansionRadius <= 0) {
+        for (i in pixels.indices) if (gradientMask[i]) outputPixels[i] = highlightColor
+    } else {
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                val idx = y * width + x
+                if (gradientMask[idx]) {
+                    for (ky in -expansionRadius..expansionRadius) {
+                        for (kx in -expansionRadius..expansionRadius) {
+                            val ny = y + ky
+                            val nx = x + kx
+                            if (ny in 0 until height && nx in 0 until width) {
+                                outputPixels[ny * width + nx] = highlightColor
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    result.setPixels(outputPixels, 0, width, 0, 0, width, height)
+    return result
+}
+
+fun applyPureDilationSync(source: Bitmap, radius: Int, highlightColor: Int): Bitmap {
+    val width = source.width
+    val height = source.height
+    val pixels = IntArray(width * height)
+    source.getPixels(pixels, 0, width, 0, 0, width, height)
+    
+    val contentMask = BooleanArray(pixels.size) { i -> isNotBackground(pixels[i]) }
+    val outputPixels = IntArray(pixels.size) { i -> if (contentMask[i]) pixels[i] else Color.WHITE }
+
+    if (radius > 0) {
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                val idx = y * width + x
+                if (contentMask[idx]) {
+                    val originalColor = pixels[idx]
+                    for (ky in -radius..radius) {
+                        for (kx in -radius..radius) {
+                            val ny = y + ky
+                            val nx = x + kx
+                            if (ny in 0 until height && nx in 0 until width) {
+                                val nIdx = ny * width + nx
+                                if (outputPixels[nIdx] == Color.WHITE) {
+                                    outputPixels[nIdx] = originalColor
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

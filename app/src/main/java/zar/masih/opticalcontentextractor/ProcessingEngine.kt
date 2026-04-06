@@ -39,10 +39,19 @@ object ProcessingEngine {
                         applyAnalyticalDewatermarkSync(task.input, task.threshold, task.kernelSize)
                     }
                     is ProcessingTask.GradientExtraction -> {
-                        applyGradientExtractionSync(task.input, task.amp, task.threshold, task.highlightColor)
+                        applyGradientExtractionSync(
+                            task.input, 
+                            task.amp, 
+                            task.threshold, 
+                            task.highlightColor,
+                            task.expansionRadius
+                        )
                     }
                     is ProcessingTask.VisibilityMask -> {
                         applyVisibilityMaskSync(task.input, task.mask, task.threshold)
+                    }
+                    is ProcessingTask.Dilation -> {
+                        applyPureDilationSync(task.input, task.radius, task.highlightColor)
                     }
                 }
                 _processingState.value = ProcessingState.Success(result)
@@ -61,9 +70,11 @@ object ProcessingEngine {
             input: Bitmap,
             val amp: Float,
             val threshold: Int,
-            val highlightColor: Int
+            val highlightColor: Int,
+            val expansionRadius: Int
         ) : ProcessingTask(input)
         class VisibilityMask(val original: Bitmap, val mask: Bitmap, val threshold: Int) : ProcessingTask(original)
+        class Dilation(input: Bitmap, val radius: Int, val highlightColor: Int) : ProcessingTask(input)
     }
 
     sealed class ProcessingState {
