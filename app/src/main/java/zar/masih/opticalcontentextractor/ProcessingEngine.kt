@@ -53,6 +53,9 @@ object ProcessingEngine {
                     is ProcessingTask.Dilation -> {
                         applyPureDilationSync(task.input, task.radius, task.highlightColor)
                     }
+                    is ProcessingTask.Inpaint -> {
+                        applyInpaintSync(task.input, task.fillColor)
+                    }
                 }
                 _processingState.value = ProcessingState.Success(result)
             }
@@ -75,6 +78,7 @@ object ProcessingEngine {
         ) : ProcessingTask(input)
         class VisibilityMask(val original: Bitmap, val mask: Bitmap, val threshold: Int) : ProcessingTask(original)
         class Dilation(input: Bitmap, val radius: Int, val highlightColor: Int) : ProcessingTask(input)
+        class Inpaint(input: Bitmap, val fillColor: Int) : ProcessingTask(input)
     }
 
     sealed class ProcessingState {
