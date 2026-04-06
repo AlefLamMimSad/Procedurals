@@ -28,6 +28,11 @@
             android:label="Analytical Processing"
             android:theme="@style/Theme.OpticalcontentExtractor" />
         <activity
+            android:name=".ObjectRemovalActivity"
+            android:exported="false"
+            android:label="Object Removal"
+            android:theme="@style/Theme.OpticalcontentExtractor" />
+        <activity
             android:name=".RetouchActivity"
             android:exported="false"
             android:label="Manual Retouch"
@@ -36,6 +41,11 @@
             android:name=".GradientExtractionActivity"
             android:exported="false"
             android:label="Gradient Extraction"
+            android:theme="@style/Theme.OpticalcontentExtractor" />
+        <activity
+            android:name=".StepsOverviewActivity"
+            android:exported="false"
+            android:label="Final Inspection"
             android:theme="@style/Theme.OpticalcontentExtractor" />
     </application>
 

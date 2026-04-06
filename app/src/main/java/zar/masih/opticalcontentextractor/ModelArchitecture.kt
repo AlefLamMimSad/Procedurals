@@ -12,10 +12,13 @@ data class ModelArchitecture(
     val layers: List<LayerConfig> = listOf(
         LayerConfig.InputLayer(),
         LayerConfig.NeuralMaskLayer(),
-        LayerConfig.AnalyticalCleanLayer(),
-        LayerConfig.RetouchLayer(),
-        LayerConfig.GradientExtractLayer()
-    )
+        LayerConfig.AnalyticalCleanLayer(),      // Layer 2
+        LayerConfig.ObjectRemovalLayer("Intermittent Object Removal"), // Index 3
+        LayerConfig.RetouchLayer(),              // Layer 4
+        LayerConfig.GradientExtractLayer(),      // Layer 5
+        LayerConfig.ObjectRemovalLayer("Final Object Removal")        // Index 6
+    ),
+    val checkpointPaths: Map<Int, String> = emptyMap() // Stores image paths for each layer result
 ) : Parcelable {
     fun getLayer(index: Int) = layers[index]
     
@@ -23,6 +26,12 @@ data class ModelArchitecture(
         val newLayers = layers.toMutableList()
         newLayers[index] = newConfig
         return copy(layers = newLayers)
+    }
+
+    fun setCheckpoint(index: Int, path: String): ModelArchitecture {
+        val newCheckpoints = checkpointPaths.toMutableMap()
+        newCheckpoints[index] = path
+        return copy(checkpointPaths = newCheckpoints)
     }
 }
 
@@ -49,6 +58,14 @@ sealed class LayerConfig : Parcelable {
         override val layerName: String = "Analytical Cleaning",
         val contrastThreshold: Int = 180,
         val kernelSize: Int = 3
+    ) : LayerConfig()
+
+    @Parcelize
+    data class ObjectRemovalLayer(
+        override val layerName: String = "Object Removal",
+        override val isEnabled: Boolean = true,
+        val minSizeThreshold: Int = 50,
+        val nToRemove: Int = 10
     ) : LayerConfig()
 
     @Parcelize

@@ -1,12 +1,7 @@
 package zar.masih.opticalcontentextractor
 
-import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
+import android.graphics.*
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -26,20 +21,19 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import zar.masih.opticalcontentextractor.ui.theme.OpticalcontentExtractorTheme
-import java.io.File
-import java.io.FileOutputStream
 
 class RetouchActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val imagePath = intent.getStringExtra("IMAGE_PATH")
         val bitmap = imagePath?.let { BitmapFactory.decodeFile(it) }
+        val modelConfig = intent.getParcelableExtra<ModelArchitecture>("MODEL_CONFIG") ?: ModelArchitecture()
 
         setContent {
             OpticalcontentExtractorTheme {
                 Scaffold { padding ->
                     if (bitmap != null) {
-                        RetouchScreen(bitmap, Modifier.padding(padding))
+                        RetouchScreen(bitmap, modelConfig, Modifier.padding(padding))
                     } else {
                         Text("No image found", modifier = Modifier.padding(padding))
                     }
@@ -50,11 +44,14 @@ class RetouchActivity : ComponentActivity() {
 }
 
 @Composable
-fun RetouchScreen(source: Bitmap, modifier: Modifier = Modifier) {
+fun RetouchScreen(source: Bitmap, model: ModelArchitecture, modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    val layerIndex = 4
+    val config = model.getLayer(layerIndex) as LayerConfig.RetouchLayer
+    
     val mutableBitmap = remember { source.copy(Bitmap.Config.ARGB_8888, true) }
-    var brushSize by remember { mutableFloatStateOf(50f) }
-    var brushStrength by remember { mutableFloatStateOf(255f) } // 0 to 255 (Alpha/Hardness)
+    var brushSize by remember { mutableFloatStateOf(config.brushSize) }
+    var brushStrength by remember { mutableFloatStateOf(config.brushStrength.toFloat()) }
     var isEraser by remember { mutableStateOf(false) }
     var triggerToggle by remember { mutableStateOf(0) }
 
@@ -71,6 +68,8 @@ fun RetouchScreen(source: Bitmap, modifier: Modifier = Modifier) {
     }
 
     Column(modifier = modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
+        ModelSummaryHeader(model, currentLayerIndex = layerIndex)
+        
         Text("Manual Retouching", style = MaterialTheme.typography.titleLarge)
         
         Spacer(modifier = Modifier.height(8.dp))
@@ -92,15 +91,21 @@ fun RetouchScreen(source: Bitmap, modifier: Modifier = Modifier) {
 
         Button(
             onClick = {
-                val path = saveRetouchedBitmap(context, mutableBitmap)
+                val path = saveBitmap(context, mutableBitmap, "checkpoint_layer4.png")
+                val updatedModel = model.updateLayer(layerIndex, config.copy(
+                    brushSize = brushSize,
+                    brushStrength = brushStrength.toInt()
+                )).setCheckpoint(layerIndex, path)
+                
                 val intent = Intent(context, GradientExtractionActivity::class.java).apply {
                     putExtra("IMAGE_PATH", path)
+                    putExtra("MODEL_CONFIG", updatedModel)
                 }
                 context.startActivity(intent)
             },
             modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
         ) {
-            Text("Amplify Gradients & Extract Objects")
+            Text("Forward Pass -> Layer 5 (Gradient Extraction)")
         }
 
         Box(
@@ -126,12 +131,4 @@ fun RetouchScreen(source: Bitmap, modifier: Modifier = Modifier) {
             }
         }
     }
-}
-
-fun saveRetouchedBitmap(context: Context, bitmap: Bitmap): String {
-    val file = File(context.cacheDir, "retouched_image.png")
-    FileOutputStream(file).use { out ->
-        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-    }
-    return file.absolutePath
 }

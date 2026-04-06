@@ -17,18 +17,19 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import zar.masih.opticalcontentextractor.ui.theme.OpticalcontentExtractorTheme
 
-class GradientExtractionActivity : ComponentActivity() {
+class ObjectRemovalActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val imagePath = intent.getStringExtra("IMAGE_PATH")
         val bitmap = imagePath?.let { BitmapFactory.decodeFile(it) }
         val modelConfig = intent.getParcelableExtra<ModelArchitecture>("MODEL_CONFIG") ?: ModelArchitecture()
+        val isFinalStep = intent.getBooleanExtra("IS_FINAL_STEP", false)
 
         setContent {
             OpticalcontentExtractorTheme {
                 Scaffold { padding ->
                     if (bitmap != null) {
-                        GradientExtractionScreen(bitmap, modelConfig, Modifier.padding(padding))
+                        ObjectRemovalScreen(bitmap, modelConfig, isFinalStep, Modifier.padding(padding))
                     } else {
                         Text("No image found", modifier = Modifier.padding(padding))
                     }
@@ -39,18 +40,18 @@ class GradientExtractionActivity : ComponentActivity() {
 }
 
 @Composable
-fun GradientExtractionScreen(source: Bitmap, model: ModelArchitecture, modifier: Modifier = Modifier) {
+fun ObjectRemovalScreen(source: Bitmap, initialModel: ModelArchitecture, isFinalStep: Boolean, modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    val layerIndex = 5
-    val config = model.getLayer(layerIndex) as LayerConfig.GradientExtractLayer
+    var model by remember { mutableStateOf(initialModel) }
+    val layerIndex = if (isFinalStep) 6 else 3
+    val config = model.getLayer(layerIndex) as LayerConfig.ObjectRemovalLayer
     
-    var amplification by remember { mutableFloatStateOf(config.amplification) }
-    var extractionThreshold by remember { mutableFloatStateOf(config.extractionThreshold.toFloat()) }
+    var nToRemove by remember { mutableFloatStateOf(config.nToRemove.toFloat()) }
     val processingState by ProcessingEngine.processingState.collectAsState()
 
-    LaunchedEffect(amplification, extractionThreshold) {
+    LaunchedEffect(nToRemove) {
         ProcessingEngine.requestProcessing(
-            ProcessingEngine.ProcessingTask.GradientExtraction(source, amplification, extractionThreshold.toInt())
+            ProcessingEngine.ProcessingTask.ObjectRemoval(source, nToRemove.toInt())
         )
     }
 
@@ -63,15 +64,12 @@ fun GradientExtractionScreen(source: Bitmap, model: ModelArchitecture, modifier:
     ) {
         ModelSummaryHeader(model, currentLayerIndex = layerIndex)
         
-        Text("Gradient Amplification", style = MaterialTheme.typography.titleLarge)
+        Text(if (isFinalStep) "Final Object Pruning" else "Intermittent Object Removal", style = MaterialTheme.typography.titleLarge)
         
         Spacer(modifier = Modifier.height(16.dp))
 
-        Text("Gradient Amplification (Power): ${String.format("%.1f", amplification)}")
-        Slider(value = amplification, onValueChange = { amplification = it }, valueRange = 1f..10f)
-
-        Text("Extraction Sensitivity (Threshold): ${extractionThreshold.toInt()}")
-        Slider(value = extractionThreshold, onValueChange = { extractionThreshold = it }, valueRange = 0f..255f)
+        Text("Number of smallest objects to remove: ${nToRemove.toInt()}")
+        Slider(value = nToRemove, onValueChange = { nToRemove = it }, valueRange = 0f..200f)
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -89,22 +87,30 @@ fun GradientExtractionScreen(source: Bitmap, model: ModelArchitecture, modifier:
                     else -> source
                 }
                 
-                val path = saveBitmap(context, currentBitmap, "checkpoint_layer5.png")
-                val updatedModel = model.updateLayer(layerIndex, config.copy(
-                    amplification = amplification,
-                    extractionThreshold = extractionThreshold.toInt()
-                )).setCheckpoint(layerIndex, path)
-
-                val nextIntent = Intent(context, ObjectRemovalActivity::class.java).apply {
+                val fileName = if (isFinalStep) "checkpoint_layer6.png" else "checkpoint_layer3.png"
+                val path = saveBitmap(context, currentBitmap, fileName)
+                
+                val updatedModel = model.updateLayer(layerIndex, config.copy(nToRemove = nToRemove.toInt()))
+                                        .setCheckpoint(layerIndex, path)
+                
+                val nextIntent = if (isFinalStep) {
+                    Intent(context, ProcessingActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+                        putExtra("IS_SUMMARY_MODE", true)
+                    }
+                } else {
+                    Intent(context, RetouchActivity::class.java)
+                }
+                
+                nextIntent.apply {
                     putExtra("IMAGE_PATH", path)
-                    putExtra("IS_FINAL_STEP", true)
                     putExtra("MODEL_CONFIG", updatedModel)
                 }
                 context.startActivity(nextIntent)
             },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Next: Object Extraction ->")
+            Text(if (isFinalStep) "Confirm & Continue" else "Confirm & Forward -> Layer 4")
         }
     }
 }
