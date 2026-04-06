@@ -81,66 +81,130 @@ fun removeSmallestObjectsSync(source: Bitmap, n: Int): Bitmap {
     return result
 }
 
-fun applyAnalyticalDewatermarkSync(source: Bitmap, threshold: Int, kernelSize: Int): Bitmap {
+fun removeBiggestObjectsSync(source: Bitmap, n: Int): Bitmap {
+    if (n <= 0) return source
+    
     val width = source.width
     val height = source.height
     val pixels = IntArray(width * height)
     source.getPixels(pixels, 0, width, 0, 0, width, height)
     
-    val outputPixels = IntArray(pixels.size)
-    val halfKernel = kernelSize / 2
+    val visited = BooleanArray(pixels.size)
+    val components = mutableListOf<List<Int>>()
 
     for (y in 0 until height) {
         for (x in 0 until width) {
             val idx = y * width + x
-            val color = pixels[idx]
-            val r = (color shr 16) and 0xFF
-            val g = (color shr 8) and 0xFF
-            val b = color and 0xFF
-            val intensity = (r + g + b) / 3
-
-            if (intensity > threshold) {
-                var rSum = 0L
-                var gSum = 0L
-                var bSum = 0L
-                var count = 0
+            if (!visited[idx] && isNotBackground(pixels[idx])) {
+                val component = mutableListOf<Int>()
+                val queue: Queue<Int> = LinkedList()
+                queue.add(idx)
+                visited[idx] = true
                 
-                for (ky in -halfKernel..halfKernel) {
-                    val ny = y + ky
-                    if (ny !in 0 until height) continue
-                    for (kx in -halfKernel..halfKernel) {
-                        val nx = x + kx
-                        if (nx in 0 until width) {
-                            val nColor = pixels[ny * width + nx]
-                            val nr = (nColor shr 16) and 0xFF
-                            val ng = (nColor shr 8) and 0xFF
-                            val nb = nColor and 0xFF
-                            if ((nr + ng + nb) / 3 <= threshold) {
-                                rSum += nr
-                                gSum += ng
-                                bSum += nb
-                                count++
+                while (queue.isNotEmpty()) {
+                    val curr = queue.poll()!!
+                    component.add(curr)
+                    
+                    val cx = curr % width
+                    val cy = curr / width
+                    
+                    for (dy in -1..1) {
+                        for (dx in -1..1) {
+                            val nx = cx + dx
+                            val ny = cy + dy
+                            if (nx in 0 until width && ny in 0 until height) {
+                                val nIdx = ny * width + nx
+                                if (!visited[nIdx] && isNotBackground(pixels[nIdx])) {
+                                    visited[nIdx] = true
+                                    queue.add(nIdx)
+                                }
                             }
                         }
                     }
                 }
-                
-                if (count > 0) {
-                    outputPixels[idx] = (0xFF shl 24) or 
-                                       ((rSum / count).toInt() shl 16) or 
-                                       ((gSum / count).toInt() shl 8) or 
-                                       (bSum / count).toInt()
-                } else {
-                    outputPixels[idx] = Color.WHITE
-                }
-            } else {
-                outputPixels[idx] = color
+                components.add(component)
             }
+        }
+    }
+
+    // Sort by size descending and take n
+    val biggestComponents = components.sortedByDescending { it.size }.take(minOf(n, components.size))
+    val outputPixels = pixels.copyOf()
+    for (comp in biggestComponents) {
+        for (idx in comp) {
+            outputPixels[idx] = Color.WHITE
         }
     }
 
     val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     result.setPixels(outputPixels, 0, width, 0, 0, width, height)
+    return result
+}
+
+fun applyZonalAnalyticalCleanSync(source: Bitmap, zones: List<AnalyticalZone>): Bitmap {
+    val width = source.width
+    val height = source.height
+    val sourcePixels = IntArray(width * height)
+    source.getPixels(sourcePixels, 0, width, 0, 0, width, height)
+    
+    val resultPixels = IntArray(width * height) { Color.WHITE }
+
+    for (zone in zones) {
+        val startX = (zone.x * width).toInt().coerceIn(0, width - 1)
+        val startY = (zone.y * height).toInt().coerceIn(0, height - 1)
+        val endX = ((zone.x + zone.width) * width).toInt().coerceIn(0, width)
+        val endY = ((zone.y + zone.height) * height).toInt().coerceIn(0, height)
+        
+        val halfKernel = zone.kernelSize / 2
+        
+        for (y in startY until endY) {
+            for (x in startX until endX) {
+                val idx = y * width + x
+                val color = sourcePixels[idx]
+                val intensity = (Color.red(color) + Color.green(color) + Color.blue(color)) / 3
+
+                var processedColor = Color.WHITE
+                if (intensity > zone.contrastThreshold) {
+                    var rSum = 0L; var gSum = 0L; var bSum = 0L; var count = 0
+                    for (ky in -halfKernel..halfKernel) {
+                        val ny = y + ky
+                        if (ny !in 0 until height) continue
+                        for (kx in -halfKernel..halfKernel) {
+                            val nx = x + kx
+                            if (nx in 0 until width) {
+                                val nColor = sourcePixels[ny * width + nx]
+                                val nr = (nColor shr 16) and 0xFF
+                                val ng = (nColor shr 8) and 0xFF
+                                val nb = nColor and 0xFF
+                                if ((nr + ng + nb) / 3 <= zone.contrastThreshold) {
+                                    rSum += nr; gSum += ng; bSum += nb; count++
+                                }
+                            }
+                        }
+                    }
+                    if (count > 0) {
+                        processedColor = (0xFF shl 24) or 
+                                       ((rSum / count).toInt() shl 16) or 
+                                       ((gSum / count).toInt() shl 8) or 
+                                       (bSum / count).toInt()
+                    }
+                } else {
+                    processedColor = color
+                }
+                
+                val currentRes = resultPixels[idx]
+                val resInten = (Color.red(currentRes) + Color.green(currentRes) + Color.blue(currentRes)) / 3
+                val procInten = (Color.red(processedColor) + Color.green(processedColor) + Color.blue(processedColor)) / 3
+                
+                if (procInten < resInten) {
+                    resultPixels[idx] = processedColor
+                }
+            }
+        }
+    }
+
+    val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    result.setPixels(resultPixels, 0, width, 0, 0, width, height)
     return result
 }
 
@@ -152,29 +216,21 @@ fun applyGradientExtractionSync(source: Bitmap, amp: Float, threshold: Int, high
     
     val gradientMask = BooleanArray(pixels.size)
 
-    // Stage 1: Gradient Detection
     for (y in 1 until height - 1) {
         for (x in 1 until width - 1) {
             val idx = y * width + x
-            
             val pX1 = pixels[y * width + (x + 1)]
             val pX0 = pixels[y * width + (x - 1)]
             val pY1 = pixels[(y + 1) * width + x]
             val pY0 = pixels[(y - 1) * width + x]
-
             fun getInten(c: Int) = (Color.red(c) + Color.green(c) + Color.blue(c)) / 3
-            
             val dx = getInten(pX1) - getInten(pX0)
             val dy = getInten(pY1) - getInten(pY0)
-            
             val magnitude = sqrt((dx * dx + dy * dy).toDouble()).toFloat()
-            if (magnitude * amp > threshold) {
-                gradientMask[idx] = true
-            }
+            if (magnitude * amp > threshold) gradientMask[idx] = true
         }
     }
 
-    // Stage 2: Morphological Dilation (The "Buffering Effect")
     val outputPixels = IntArray(pixels.size) { Color.WHITE }
     if (expansionRadius <= 0) {
         for (i in pixels.indices) if (gradientMask[i]) outputPixels[i] = highlightColor
@@ -207,10 +263,8 @@ fun applyPureDilationSync(source: Bitmap, radius: Int, highlightColor: Int): Bit
     val height = source.height
     val pixels = IntArray(width * height)
     source.getPixels(pixels, 0, width, 0, 0, width, height)
-    
     val contentMask = BooleanArray(pixels.size) { i -> isNotBackground(pixels[i]) }
     val outputPixels = IntArray(pixels.size) { i -> if (contentMask[i]) pixels[i] else Color.WHITE }
-
     if (radius > 0) {
         for (y in 0 until height) {
             for (x in 0 until width) {
@@ -233,7 +287,6 @@ fun applyPureDilationSync(source: Bitmap, radius: Int, highlightColor: Int): Bit
             }
         }
     }
-
     val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     result.setPixels(outputPixels, 0, width, 0, 0, width, height)
     return result
@@ -244,10 +297,8 @@ fun applyInpaintSync(source: Bitmap, fillColor: Int): Bitmap {
     val height = source.height
     val pixels = IntArray(width * height)
     source.getPixels(pixels, 0, width, 0, 0, width, height)
-    
     val visited = BooleanArray(pixels.size)
     val outputPixels = IntArray(pixels.size) { Color.WHITE }
-
     for (y in 0 until height) {
         for (x in 0 until width) {
             val idx = y * width + x
@@ -256,85 +307,46 @@ fun applyInpaintSync(source: Bitmap, fillColor: Int): Bitmap {
                 val queue: Queue<Int> = LinkedList()
                 queue.add(idx)
                 visited[idx] = true
-                
-                var minX = x; var maxX = x
-                var minY = y; var maxY = y
-                
                 while (queue.isNotEmpty()) {
                     val curr = queue.poll()!!
                     component.add(curr)
-                    val cx = curr % width
-                    val cy = curr / width
-                    
-                    minX = minOf(minX, cx); maxX = maxOf(maxX, cx)
-                    minY = minOf(minY, cy); maxY = maxOf(maxY, cy)
-                    
+                    val cx = curr % width; val cy = curr / width
                     for (dy in -1..1) {
                         for (dx in -1..1) {
-                            val nx = cx + dx
-                            val ny = cy + dy
+                            val nx = cx + dx; val ny = cy + dy
                             if (nx in 0 until width && ny in 0 until height) {
                                 val nIdx = ny * width + nx
                                 if (!visited[nIdx] && isNotBackground(pixels[nIdx])) {
-                                    visited[nIdx] = true
-                                    queue.add(nIdx)
+                                    visited[nIdx] = true; queue.add(nIdx)
                                 }
                             }
                         }
                     }
                 }
-                
-                // Fill the "hollow" parts of the component. 
-                // A simple approach is to fill everything inside the bounding box that isn't connected to the outside.
-                // But the user said "fill shape with solid color", usually meaning connected components.
-                for (cy in minY..maxY) {
-                    for (cx in minX..maxX) {
-                        val cIdx = cy * width + cx
-                        // If it's part of the component, fill it.
-                        // To fill hollow fonts, we might need a more complex "hole filling" algorithm.
-                        // For now, let's fill the pixels of the component itself with the solid color.
-                    }
-                }
-                
-                for (idxInComp in component) {
-                    outputPixels[idxInComp] = fillColor
-                }
+                for (idxInComp in component) outputPixels[idxInComp] = fillColor
             }
         }
     }
-
     val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     result.setPixels(outputPixels, 0, width, 0, 0, width, height)
     return result
 }
 
 fun applyVisibilityMaskSync(original: Bitmap, mask: Bitmap, threshold: Int): Bitmap {
-    val width = original.width
-    val height = original.height
-    
+    val width = original.width; val height = original.height
     val scaledMask = if (mask.width != width || mask.height != height) {
         Bitmap.createScaledBitmap(mask, width, height, true)
     } else mask
-    
     val origPixels = IntArray(width * height)
     original.getPixels(origPixels, 0, width, 0, 0, width, height)
-    
     val maskPixels = IntArray(width * height)
     scaledMask.getPixels(maskPixels, 0, width, 0, 0, width, height)
-    
     val outputPixels = IntArray(width * height)
-    
     for (i in origPixels.indices) {
         val maskColor = maskPixels[i]
         val maskIntensity = (Color.red(maskColor) + Color.green(maskColor) + Color.blue(maskColor)) / 3
-        
-        if (maskIntensity < threshold) {
-            outputPixels[i] = origPixels[i]
-        } else {
-            outputPixels[i] = Color.WHITE
-        }
+        if (maskIntensity < threshold) outputPixels[i] = origPixels[i] else outputPixels[i] = Color.WHITE
     }
-    
     val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     result.setPixels(outputPixels, 0, width, 0, 0, width, height)
     return result
@@ -342,16 +354,13 @@ fun applyVisibilityMaskSync(original: Bitmap, mask: Bitmap, threshold: Int): Bit
 
 fun saveBitmap(context: Context, bitmap: Bitmap, fileName: String): String {
     val file = File(context.cacheDir, fileName)
-    FileOutputStream(file).use { out ->
-        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-    }
+    FileOutputStream(file).use { out -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) }
     return file.absolutePath
 }
 
 fun exportBitmapToGallery(context: Context, imagePath: String, layerName: String) {
     val bitmap = BitmapFactory.decodeFile(imagePath) ?: return
     val fileName = "OCE_${layerName.replace(" ", "_")}_${System.currentTimeMillis()}.png"
-    
     val outputStream: OutputStream?
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
         val resolver = context.contentResolver
@@ -367,7 +376,6 @@ fun exportBitmapToGallery(context: Context, imagePath: String, layerName: String
         val file = File(imagesDir, fileName)
         outputStream = FileOutputStream(file)
     }
-
     outputStream?.use {
         bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
         Toast.makeText(context, "Saved to Gallery: $fileName", Toast.LENGTH_LONG).show()

@@ -35,8 +35,11 @@ object ProcessingEngine {
                     is ProcessingTask.ObjectRemoval -> {
                         removeSmallestObjectsSync(task.input, task.n)
                     }
+                    is ProcessingTask.RemoveBiggestObjects -> {
+                        removeBiggestObjectsSync(task.input, task.n)
+                    }
                     is ProcessingTask.AnalyticalClean -> {
-                        applyAnalyticalDewatermarkSync(task.input, task.threshold, task.kernelSize)
+                        applyZonalAnalyticalCleanSync(task.input, task.zones)
                     }
                     is ProcessingTask.GradientExtraction -> {
                         applyGradientExtractionSync(
@@ -68,7 +71,8 @@ object ProcessingEngine {
 
     sealed class ProcessingTask(val input: Bitmap) {
         class ObjectRemoval(input: Bitmap, val n: Int) : ProcessingTask(input)
-        class AnalyticalClean(input: Bitmap, val threshold: Int, val kernelSize: Int) : ProcessingTask(input)
+        class RemoveBiggestObjects(input: Bitmap, val n: Int) : ProcessingTask(input)
+        class AnalyticalClean(input: Bitmap, val zones: List<AnalyticalZone>) : ProcessingTask(input)
         class GradientExtraction(
             input: Bitmap,
             val amp: Float,

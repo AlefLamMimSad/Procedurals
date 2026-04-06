@@ -23,10 +23,14 @@ class ObjectRemovalActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val imagePath = intent.getStringExtra("IMAGE_PATH")
         val modelConfig = intent.getParcelableExtra<ModelArchitecture>("MODEL_CONFIG") ?: ModelArchitecture()
-        val isFinalStep = intent.getBooleanExtra("IS_FINAL_STEP", false)
+        val step = intent.getStringExtra("REMOVAL_STEP") ?: "INTERMITTENT"
         
-        // Correct layer indexing: Layer 3 is Intermittent, Layer 7 is Final
-        val layerIndex = if (isFinalStep) 7 else 3
+        val layerIndex = when(step) {
+            "BIGGEST" -> 9
+            "FINAL" -> 7
+            else -> 3
+        }
+        
         val actualInputPath = imagePath ?: modelConfig.getLastValidPath(layerIndex)
         val bitmap = actualInputPath?.let { BitmapFactory.decodeFile(it) }
 
@@ -34,7 +38,7 @@ class ObjectRemovalActivity : ComponentActivity() {
             OpticalcontentExtractorTheme {
                 Scaffold { padding ->
                     if (bitmap != null) {
-                        ObjectRemovalScreen(bitmap, modelConfig, isFinalStep, Modifier.padding(padding))
+                        ObjectRemovalScreen(bitmap, modelConfig, step, Modifier.padding(padding))
                     } else {
                         Text("No image found", modifier = Modifier.padding(padding))
                     }
@@ -45,10 +49,16 @@ class ObjectRemovalActivity : ComponentActivity() {
 }
 
 @Composable
-fun ObjectRemovalScreen(source: Bitmap, initialModel: ModelArchitecture, isFinalStep: Boolean, modifier: Modifier = Modifier) {
+fun ObjectRemovalScreen(source: Bitmap, initialModel: ModelArchitecture, step: String, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     var model by remember { mutableStateOf(initialModel) }
-    val layerIndex = if (isFinalStep) 7 else 3
+    
+    val layerIndex = when(step) {
+        "BIGGEST" -> 9
+        "FINAL" -> 7
+        else -> 3
+    }
+    
     val config = model.getLayer(layerIndex) as LayerConfig.ObjectRemovalLayer
     
     var nToRemove by remember { mutableFloatStateOf(config.nToRemove.toFloat()) }
@@ -57,10 +67,13 @@ fun ObjectRemovalScreen(source: Bitmap, initialModel: ModelArchitecture, isFinal
 
     LaunchedEffect(nToRemove, isEnabled) {
         if (!isEnabled) return@LaunchedEffect
-        delay(150) // Debounce
-        ProcessingEngine.requestProcessing(
+        delay(150)
+        val task = if (step == "BIGGEST") {
+            ProcessingEngine.ProcessingTask.RemoveBiggestObjects(source, nToRemove.toInt())
+        } else {
             ProcessingEngine.ProcessingTask.ObjectRemoval(source, nToRemove.toInt())
-        )
+        }
+        ProcessingEngine.requestProcessing(task)
     }
 
     Column(
@@ -73,7 +86,7 @@ fun ObjectRemovalScreen(source: Bitmap, initialModel: ModelArchitecture, isFinal
         ModelSummaryHeader(model, currentLayerIndex = layerIndex)
         
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(if (isFinalStep) "Final Object Pruning" else "Intermittent Object Removal", style = MaterialTheme.typography.titleLarge)
+            Text(config.layerName, style = MaterialTheme.typography.titleLarge)
             Spacer(modifier = Modifier.weight(1f))
             Switch(checked = isEnabled, onCheckedChange = { isEnabled = it })
         }
@@ -81,10 +94,10 @@ fun ObjectRemovalScreen(source: Bitmap, initialModel: ModelArchitecture, isFinal
         Spacer(modifier = Modifier.height(16.dp))
 
         if (isEnabled) {
-            Text("Number of smallest objects to remove: ${nToRemove.toInt()}")
-            Slider(value = nToRemove, onValueChange = { nToRemove = it }, valueRange = 0f..200f)
+            Text("Number of objects to remove: ${nToRemove.toInt()}")
+            Slider(value = nToRemove, onValueChange = { nToRemove = it }, valueRange = 0f..if (step == "BIGGEST") 20f else 200f)
         } else {
-            Text("Layer Disabled - Skipping calculation", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.secondary)
+            Text("Layer Disabled - Skipping", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.secondary)
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -105,32 +118,38 @@ fun ObjectRemovalScreen(source: Bitmap, initialModel: ModelArchitecture, isFinal
                     }
                 } else source
                 
-                val fileName = if (isFinalStep) "checkpoint_layer7.png" else "checkpoint_layer3.png"
+                val fileName = "checkpoint_layer$layerIndex.png"
                 val path = if (isEnabled) saveBitmap(context, currentBitmap, fileName) else model.getLastValidPath(layerIndex) ?: ""
                 
                 val updatedConfig = config.copy(nToRemove = nToRemove.toInt(), isEnabled = isEnabled)
                 val updatedModel = model.updateLayer(layerIndex, updatedConfig)
-                
                 val finalModel = if (isEnabled) updatedModel.setCheckpoint(layerIndex, path) else updatedModel
                 
-                // Persist hyper-parameters as defaults
                 finalModel.saveAsDefaults(context)
                 
-                val nextIntent = if (isFinalStep) {
-                    Intent(context, InpaintActivity::class.java)
-                } else {
-                    Intent(context, VisibilityMaskActivity::class.java)
+                val nextIntent = when(step) {
+                    "INTERMITTENT" -> Intent(context, VisibilityMaskActivity::class.java)
+                    "FINAL" -> Intent(context, InpaintActivity::class.java)
+                    else -> {
+                        Intent(context, ProcessingActivity::class.java).apply {
+                            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+                            putExtra("IS_SUMMARY_MODE", true)
+                        }
+                    }
                 }
                 
-                nextIntent.apply {
-                    putExtra("IMAGE_PATH", path)
-                    putExtra("MODEL_CONFIG", finalModel)
-                }
+                nextIntent.putExtra("IMAGE_PATH", path)
+                nextIntent.putExtra("MODEL_CONFIG", finalModel)
                 context.startActivity(nextIntent)
             },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text(if (isFinalStep) "Forward Pass -> Layer 8 (Shape Infilling)" else "Forward Pass -> Layer 4")
+            val nextText = when(step) {
+                "INTERMITTENT" -> "Forward Pass -> Layer 4"
+                "FINAL" -> "Forward Pass -> Layer 8"
+                else -> "Complete & View Summary"
+            }
+            Text(nextText)
         }
     }
 }

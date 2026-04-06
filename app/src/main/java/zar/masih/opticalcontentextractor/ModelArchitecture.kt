@@ -2,7 +2,21 @@ package zar.masih.opticalcontentextractor
 
 import android.content.Context
 import android.os.Parcelable
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import kotlinx.parcelize.Parcelize
+
+@Parcelize
+data class AnalyticalZone(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val x: Float = 0f, // 0..1 relative
+    val y: Float = 0f, // 0..1 relative
+    val width: Float = 1f, // 0..1 relative
+    val height: Float = 1f, // 0..1 relative
+    val contrastThreshold: Int = 180,
+    val kernelSize: Int = 3,
+    val isFullImage: Boolean = false
+) : Parcelable
 
 @Parcelize
 data class ModelArchitecture(
@@ -15,7 +29,8 @@ data class ModelArchitecture(
         LayerConfig.DilationLayer(),             // Index 5 (Object Expansion)
         LayerConfig.GradientExtractLayer(),      // Index 6
         LayerConfig.ObjectRemovalLayer(layerName = "Final Object Removal"),        // Index 7
-        LayerConfig.InpaintLayer()               // Index 8
+        LayerConfig.InpaintLayer(),              // Index 8
+        LayerConfig.ObjectRemovalLayer(layerName = "Biggest Object Removal")       // Index 9 (New)
     ),
     val checkpointPaths: Map<Int, String> = emptyMap()
 ) : Parcelable {
@@ -41,12 +56,9 @@ data class ModelArchitecture(
         return null
     }
 
-    /**
-     * Saves the current state of all layers as defaults for future projects.
-     * Acting as the "Default Center".
-     */
     fun saveAsDefaults(context: Context) {
         val prefs = context.getSharedPreferences("hyper_params_center", Context.MODE_PRIVATE).edit()
+        val gson = Gson()
         layers.forEachIndexed { index, config ->
             val keyPrefix = "l${index}_"
             prefs.putBoolean("${keyPrefix}enabled", config.isEnabled)
@@ -56,8 +68,7 @@ data class ModelArchitecture(
                     prefs.putInt("${keyPrefix}dark", config.darkThreshold)
                 }
                 is LayerConfig.AnalyticalCleanLayer -> {
-                    prefs.putInt("${keyPrefix}contrast", config.contrastThreshold)
-                    prefs.putInt("${keyPrefix}kernel", config.kernelSize)
+                    prefs.putString("${keyPrefix}zones", gson.toJson(config.zones))
                 }
                 is LayerConfig.ObjectRemovalLayer -> {
                     prefs.putInt("${keyPrefix}n", config.nToRemove)
@@ -83,12 +94,10 @@ data class ModelArchitecture(
     }
 
     companion object {
-        /**
-         * Loads the last project's settings into a new model architecture instance.
-         */
         fun loadDefaults(context: Context): ModelArchitecture {
             val prefs = context.getSharedPreferences("hyper_params_center", Context.MODE_PRIVATE)
             val base = ModelArchitecture()
+            val gson = Gson()
             val loadedLayers = base.layers.mapIndexed { index, defaultConfig ->
                 val keyPrefix = "l${index}_"
                 if (!prefs.contains("${keyPrefix}enabled")) return@mapIndexed defaultConfig
@@ -100,11 +109,16 @@ data class ModelArchitecture(
                         isEnabled = isEnabled,
                         darkThreshold = prefs.getInt("${keyPrefix}dark", defaultConfig.darkThreshold)
                     )
-                    is LayerConfig.AnalyticalCleanLayer -> defaultConfig.copy(
-                        isEnabled = isEnabled,
-                        contrastThreshold = prefs.getInt("${keyPrefix}contrast", defaultConfig.contrastThreshold),
-                        kernelSize = prefs.getInt("${keyPrefix}kernel", defaultConfig.kernelSize)
-                    )
+                    is LayerConfig.AnalyticalCleanLayer -> {
+                        val zonesJson = prefs.getString("${keyPrefix}zones", null)
+                        val zones = if (zonesJson != null) {
+                            val type = object : TypeToken<List<AnalyticalZone>>() {}.type
+                            gson.fromJson<List<AnalyticalZone>>(zonesJson, type)
+                        } else {
+                            listOf(AnalyticalZone(isFullImage = true))
+                        }
+                        defaultConfig.copy(isEnabled = isEnabled, zones = zones)
+                    }
                     is LayerConfig.ObjectRemovalLayer -> defaultConfig.copy(
                         isEnabled = isEnabled,
                         nToRemove = prefs.getInt("${keyPrefix}n", defaultConfig.nToRemove)
@@ -156,8 +170,7 @@ sealed class LayerConfig : Parcelable {
     data class AnalyticalCleanLayer(
         override val isEnabled: Boolean = true,
         override val layerName: String = "Analytical Cleaning",
-        val contrastThreshold: Int = 180,
-        val kernelSize: Int = 3
+        val zones: List<AnalyticalZone> = listOf(AnalyticalZone(isFullImage = true))
     ) : LayerConfig()
 
     @Parcelize

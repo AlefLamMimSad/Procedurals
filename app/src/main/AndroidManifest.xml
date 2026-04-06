@@ -38,9 +38,19 @@
             android:label="Visibility Masking"
             android:theme="@style/Theme.OpticalcontentExtractor" />
         <activity
+            android:name=".DilationActivity"
+            android:exported="false"
+            android:label="Object Expansion"
+            android:theme="@style/Theme.OpticalcontentExtractor" />
+        <activity
             android:name=".GradientExtractionActivity"
             android:exported="false"
             android:label="Gradient Extraction"
+            android:theme="@style/Theme.OpticalcontentExtractor" />
+        <activity
+            android:name=".InpaintActivity"
+            android:exported="false"
+            android:label="Shape Infilling"
             android:theme="@style/Theme.OpticalcontentExtractor" />
         <activity
             android:name=".StepsOverviewActivity"
