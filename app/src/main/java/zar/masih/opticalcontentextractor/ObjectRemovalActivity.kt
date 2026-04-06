@@ -22,9 +22,13 @@ class ObjectRemovalActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val imagePath = intent.getStringExtra("IMAGE_PATH")
-        val bitmap = imagePath?.let { BitmapFactory.decodeFile(it) }
         val modelConfig = intent.getParcelableExtra<ModelArchitecture>("MODEL_CONFIG") ?: ModelArchitecture()
         val isFinalStep = intent.getBooleanExtra("IS_FINAL_STEP", false)
+        
+        // If imagePath is null, try to recover from model checkpoints
+        val layerIndex = if (isFinalStep) 6 else 3
+        val actualInputPath = imagePath ?: modelConfig.getLastValidPath(layerIndex)
+        val bitmap = actualInputPath?.let { BitmapFactory.decodeFile(it) }
 
         setContent {
             OpticalcontentExtractorTheme {
@@ -48,9 +52,11 @@ fun ObjectRemovalScreen(source: Bitmap, initialModel: ModelArchitecture, isFinal
     val config = model.getLayer(layerIndex) as LayerConfig.ObjectRemovalLayer
     
     var nToRemove by remember { mutableFloatStateOf(config.nToRemove.toFloat()) }
+    var isEnabled by remember { mutableStateOf(config.isEnabled) }
     val processingState by ProcessingEngine.processingState.collectAsState()
 
-    LaunchedEffect(nToRemove) {
+    LaunchedEffect(nToRemove, isEnabled) {
+        if (!isEnabled) return@LaunchedEffect
         delay(150) // Debounce
         ProcessingEngine.requestProcessing(
             ProcessingEngine.ProcessingTask.ObjectRemoval(source, nToRemove.toInt())
@@ -66,34 +72,49 @@ fun ObjectRemovalScreen(source: Bitmap, initialModel: ModelArchitecture, isFinal
     ) {
         ModelSummaryHeader(model, currentLayerIndex = layerIndex)
         
-        Text(if (isFinalStep) "Final Object Pruning" else "Intermittent Object Removal", style = MaterialTheme.typography.titleLarge)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(if (isFinalStep) "Final Object Pruning" else "Intermittent Object Removal", style = MaterialTheme.typography.titleLarge)
+            Spacer(modifier = Modifier.weight(1f))
+            Switch(checked = isEnabled, onCheckedChange = { isEnabled = it })
+        }
         
         Spacer(modifier = Modifier.height(16.dp))
 
-        Text("Number of smallest objects to remove: ${nToRemove.toInt()}")
-        Slider(value = nToRemove, onValueChange = { nToRemove = it }, valueRange = 0f..200f)
+        if (isEnabled) {
+            Text("Number of smallest objects to remove: ${nToRemove.toInt()}")
+            Slider(value = nToRemove, onValueChange = { nToRemove = it }, valueRange = 0f..200f)
+        } else {
+            Text("Layer Disabled - Skipping calculation", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.secondary)
+        }
 
         Spacer(modifier = Modifier.height(16.dp))
 
         UnifiedPreview(
             initialBitmap = source,
-            state = processingState
+            state = if (isEnabled) processingState else ProcessingEngine.ProcessingState.Idle
         )
 
         Spacer(modifier = Modifier.height(16.dp))
 
         Button(
             onClick = {
-                val currentBitmap = when (val s = processingState) {
-                    is ProcessingEngine.ProcessingState.Success -> s.bitmap
-                    else -> source
-                }
+                val currentBitmap = if (isEnabled) {
+                    when (val s = processingState) {
+                        is ProcessingEngine.ProcessingState.Success -> s.bitmap
+                        else -> source
+                    }
+                } else source
                 
                 val fileName = if (isFinalStep) "checkpoint_layer6.png" else "checkpoint_layer3.png"
-                val path = saveBitmap(context, currentBitmap, fileName)
+                val path = if (isEnabled) saveBitmap(context, currentBitmap, fileName) else model.getLastValidPath(layerIndex) ?: ""
                 
-                val updatedModel = model.updateLayer(layerIndex, config.copy(nToRemove = nToRemove.toInt()))
-                                        .setCheckpoint(layerIndex, path)
+                val updatedConfig = config.copy(nToRemove = nToRemove.toInt(), isEnabled = isEnabled)
+                val updatedModel = model.updateLayer(layerIndex, updatedConfig)
+                
+                val finalModel = if (isEnabled) updatedModel.setCheckpoint(layerIndex, path) else updatedModel
+                
+                // Persist hyper-parameters as defaults
+                finalModel.saveAsDefaults(context)
                 
                 val nextIntent = if (isFinalStep) {
                     Intent(context, ProcessingActivity::class.java).apply {
@@ -106,13 +127,13 @@ fun ObjectRemovalScreen(source: Bitmap, initialModel: ModelArchitecture, isFinal
                 
                 nextIntent.apply {
                     putExtra("IMAGE_PATH", path)
-                    putExtra("MODEL_CONFIG", updatedModel)
+                    putExtra("MODEL_CONFIG", finalModel)
                 }
                 context.startActivity(nextIntent)
             },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text(if (isFinalStep) "Confirm & Continue" else "Forward Pass -> Layer 4 (Visibility Mask)")
+            Text(if (isFinalStep) "Confirm & Continue" else "Forward Pass -> Layer 4")
         }
     }
 }

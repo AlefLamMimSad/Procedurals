@@ -51,6 +51,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation(libs.play.services.mlkit.document.scanner)
+    implementation("com.google.code.gson:gson:2.11.0")
     
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

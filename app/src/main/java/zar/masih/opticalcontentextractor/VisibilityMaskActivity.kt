@@ -21,13 +21,15 @@ import zar.masih.opticalcontentextractor.ui.theme.OpticalcontentExtractorTheme
 class VisibilityMaskActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val maskPath = intent.getStringExtra("IMAGE_PATH")
-        val maskBitmap = maskPath?.let { BitmapFactory.decodeFile(it) }
+        val imagePath = intent.getStringExtra("IMAGE_PATH")
         val modelConfig = intent.getParcelableExtra<ModelArchitecture>("MODEL_CONFIG") ?: ModelArchitecture()
         
-        // Find the original image from the first checkpoint (index 0 or 1)
+        val layerIndex = 4
         val originalPath = modelConfig.checkpointPaths[0] ?: modelConfig.checkpointPaths[1]
         val originalBitmap = originalPath?.let { BitmapFactory.decodeFile(it) }
+
+        val actualInputPath = imagePath ?: modelConfig.getLastValidPath(layerIndex)
+        val maskBitmap = actualInputPath?.let { BitmapFactory.decodeFile(it) }
 
         setContent {
             OpticalcontentExtractorTheme {
@@ -51,9 +53,11 @@ fun VisibilityMaskScreen(original: Bitmap, mask: Bitmap, initialModel: ModelArch
     val config = model.getLayer(layerIndex) as LayerConfig.VisibilityMaskLayer
     
     var threshold by remember { mutableFloatStateOf(config.maskThreshold.toFloat()) }
+    var isEnabled by remember { mutableStateOf(config.isEnabled) }
     val processingState by ProcessingEngine.processingState.collectAsState()
 
-    LaunchedEffect(threshold) {
+    LaunchedEffect(threshold, isEnabled) {
+        if (!isEnabled) return@LaunchedEffect
         delay(150)
         ProcessingEngine.requestProcessing(
             ProcessingEngine.ProcessingTask.VisibilityMask(original, mask, threshold.toInt())
@@ -69,37 +73,51 @@ fun VisibilityMaskScreen(original: Bitmap, mask: Bitmap, initialModel: ModelArch
     ) {
         ModelSummaryHeader(model, currentLayerIndex = layerIndex)
         
-        Text("Visibility Masking", style = MaterialTheme.typography.titleLarge)
-        Text("Using Layer 3 as a mask over Original Image", style = MaterialTheme.typography.bodyMedium)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Visibility Masking", style = MaterialTheme.typography.titleLarge)
+            Spacer(modifier = Modifier.weight(1f))
+            Switch(checked = isEnabled, onCheckedChange = { isEnabled = it })
+        }
         
         Spacer(modifier = Modifier.height(16.dp))
 
-        Text("Mask Sensitivity: ${threshold.toInt()}")
-        Slider(value = threshold, onValueChange = { threshold = it }, valueRange = 0f..255f)
+        if (isEnabled) {
+            Text("Mask Sensitivity: ${threshold.toInt()}")
+            Slider(value = threshold, onValueChange = { threshold = it }, valueRange = 0f..255f)
+        } else {
+            Text("Layer Disabled - Skipping calculation", color = MaterialTheme.colorScheme.secondary)
+        }
 
         Spacer(modifier = Modifier.height(16.dp))
 
         UnifiedPreview(
             initialBitmap = mask,
-            state = processingState
+            state = if (isEnabled) processingState else ProcessingEngine.ProcessingState.Idle
         )
 
         Spacer(modifier = Modifier.height(16.dp))
 
         Button(
             onClick = {
-                val currentBitmap = when (val s = processingState) {
-                    is ProcessingEngine.ProcessingState.Success -> s.bitmap
-                    else -> mask
-                }
+                val currentBitmap = if (isEnabled) {
+                    when (val s = processingState) {
+                        is ProcessingEngine.ProcessingState.Success -> s.bitmap
+                        else -> mask
+                    }
+                } else mask
                 
-                val path = saveBitmap(context, currentBitmap, "checkpoint_layer4.png")
-                val updatedModel = model.updateLayer(layerIndex, config.copy(maskThreshold = threshold.toInt()))
-                                        .setCheckpoint(layerIndex, path)
+                val fileName = "checkpoint_layer4.png"
+                val path = if (isEnabled) saveBitmap(context, currentBitmap, fileName) else model.getLastValidPath(layerIndex) ?: ""
+                
+                val updatedConfig = config.copy(maskThreshold = threshold.toInt(), isEnabled = isEnabled)
+                val updatedModel = model.updateLayer(layerIndex, updatedConfig)
+                val finalModel = if (isEnabled) updatedModel.setCheckpoint(layerIndex, path) else updatedModel
+                
+                finalModel.saveAsDefaults(context)
                 
                 val nextIntent = Intent(context, GradientExtractionActivity::class.java).apply {
                     putExtra("IMAGE_PATH", path)
-                    putExtra("MODEL_CONFIG", updatedModel)
+                    putExtra("MODEL_CONFIG", finalModel)
                 }
                 context.startActivity(nextIntent)
             },

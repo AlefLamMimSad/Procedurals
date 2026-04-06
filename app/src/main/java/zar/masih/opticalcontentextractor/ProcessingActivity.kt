@@ -8,9 +8,12 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -26,9 +29,12 @@ class ProcessingActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val imagePath = intent.getStringExtra("IMAGE_PATH")
-        val bitmap = imagePath?.let { BitmapFactory.decodeFile(it) }
         val modelConfig = intent.getParcelableExtra<ModelArchitecture>("MODEL_CONFIG") ?: ModelArchitecture()
         val isSummaryMode = intent.getBooleanExtra("IS_SUMMARY_MODE", false)
+
+        val layerIndex = 2
+        val actualInputPath = imagePath ?: modelConfig.getLastValidPath(layerIndex)
+        val bitmap = actualInputPath?.let { BitmapFactory.decodeFile(it) }
 
         setContent {
             OpticalcontentExtractorTheme {
@@ -51,6 +57,11 @@ class ProcessingActivity : ComponentActivity() {
 @Composable
 fun SummaryScreen(model: ModelArchitecture, modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    val sortedCheckpoints = remember(model.checkpointPaths) { model.checkpointPaths.toSortedMap() }
+    val lastLayerIndex = sortedCheckpoints.keys.lastOrNull() ?: 0
+    var selectedLayerIndex by remember { mutableStateOf<Int?>(null) }
+    
+    val effectiveExportIndex = selectedLayerIndex ?: lastLayerIndex
     
     Column(
         modifier = modifier
@@ -59,17 +70,33 @@ fun SummaryScreen(model: ModelArchitecture, modifier: Modifier = Modifier) {
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("Sequential Pipeline Export", style = MaterialTheme.typography.headlineMedium)
+        Text("Pipeline Export Selection", style = MaterialTheme.typography.headlineMedium)
+        Text("Select a checkpoint to export (defaults to last)", style = MaterialTheme.typography.bodySmall)
         Spacer(modifier = Modifier.height(16.dp))
         
-        model.checkpointPaths.toSortedMap().forEach { (index, path) ->
+        sortedCheckpoints.forEach { (index, path) ->
             val layer = model.getLayer(index)
+            val isSelected = selectedLayerIndex == index || (selectedLayerIndex == null && index == lastLayerIndex)
+            
             Card(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp)
+                    .clickable { selectedLayerIndex = index },
+                elevation = CardDefaults.cardElevation(defaultElevation = if (isSelected) 8.dp else 2.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
+                ),
+                border = if (isSelected) CardDefaults.outlinedCardBorder() else null
             ) {
                 Column(modifier = Modifier.padding(8.dp)) {
-                    Text("Layer $index: ${layer.layerName}", style = MaterialTheme.typography.titleMedium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Layer $index: ${layer.layerName}", style = MaterialTheme.typography.titleMedium)
+                        Spacer(modifier = Modifier.weight(1f))
+                        if (isSelected) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
                     val bitmap = BitmapFactory.decodeFile(path)
                     if (bitmap != null) {
                         Image(
@@ -87,11 +114,15 @@ fun SummaryScreen(model: ModelArchitecture, modifier: Modifier = Modifier) {
         
         Button(
             onClick = {
-                Toast.makeText(context, "Exporting ${model.checkpointPaths.size} checkpoints...", Toast.LENGTH_LONG).show()
+                val exportPath = model.checkpointPaths[effectiveExportIndex]
+                val layer = model.getLayer(effectiveExportIndex)
+                if (exportPath != null) {
+                    exportBitmapToGallery(context, exportPath, layer.layerName)
+                }
             },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Export All Resultant Data")
+            Text("Export Layer $effectiveExportIndex Result")
         }
 
         OutlinedButton(
@@ -117,20 +148,15 @@ fun ProcessingScreen(source: Bitmap, initialModel: ModelArchitecture, modifier: 
     
     var kernelSize by remember { mutableFloatStateOf(config.kernelSize.toFloat()) }
     var contrastThreshold by remember { mutableFloatStateOf(config.contrastThreshold.toFloat()) }
-    var isLayerEnabled by remember { mutableStateOf(config.isEnabled) }
+    var isEnabled by remember { mutableStateOf(config.isEnabled) }
     
     val processingState by ProcessingEngine.processingState.collectAsState()
 
     ModelSummaryHeader(model, currentLayerIndex = layerIndex)
 
-    LaunchedEffect(kernelSize, contrastThreshold, isLayerEnabled) {
-        if (!isLayerEnabled) {
-            return@LaunchedEffect
-        }
-        
-        // Debounce: wait for user to finish sliding
+    LaunchedEffect(kernelSize, contrastThreshold, isEnabled) {
+        if (!isEnabled) return@LaunchedEffect
         delay(150)
-        
         ProcessingEngine.requestProcessing(
             ProcessingEngine.ProcessingTask.AnalyticalClean(
                 source, contrastThreshold.toInt(), kernelSize.toInt()
@@ -147,47 +173,55 @@ fun ProcessingScreen(source: Bitmap, initialModel: ModelArchitecture, modifier: 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Layer $layerIndex: ${config.layerName}", style = MaterialTheme.typography.titleLarge)
             Spacer(modifier = Modifier.weight(1f))
-            Switch(checked = isLayerEnabled, onCheckedChange = { isLayerEnabled = it })
+            Switch(checked = isEnabled, onCheckedChange = { isEnabled = it })
         }
         
         Spacer(modifier = Modifier.height(16.dp))
 
-        if (isLayerEnabled) {
+        if (isEnabled) {
             Text("Contrast Threshold: ${contrastThreshold.toInt()}")
             Slider(value = contrastThreshold, onValueChange = { contrastThreshold = it }, valueRange = 0f..255f)
 
             Text("Kernel Size: ${kernelSize.toInt()}")
             Slider(value = kernelSize, onValueChange = { kernelSize = it }, valueRange = 1f..15f)
+        } else {
+            Text("Layer Disabled - Skipping calculation", color = MaterialTheme.colorScheme.secondary)
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
         UnifiedPreview(
             initialBitmap = source,
-            state = if (isLayerEnabled) processingState else ProcessingEngine.ProcessingState.Idle
+            state = if (isEnabled) processingState else ProcessingEngine.ProcessingState.Idle
         )
 
         Spacer(modifier = Modifier.height(16.dp))
 
         Button(
             onClick = {
-                val currentBitmap = if (isLayerEnabled) {
+                val currentBitmap = if (isEnabled) {
                     when (val s = processingState) {
                         is ProcessingEngine.ProcessingState.Success -> s.bitmap
                         else -> source
                     }
                 } else source
 
-                val path = saveBitmap(context, currentBitmap, "checkpoint_layer2.png")
-                val updatedModel = model.updateLayer(layerIndex, config.copy(
-                    isEnabled = isLayerEnabled,
+                val path = if (isEnabled) saveBitmap(context, currentBitmap, "checkpoint_layer2.png") else model.getLastValidPath(layerIndex) ?: ""
+                
+                val updatedConfig = config.copy(
+                    isEnabled = isEnabled,
                     contrastThreshold = contrastThreshold.toInt(),
                     kernelSize = kernelSize.toInt()
-                )).setCheckpoint(layerIndex, path)
+                )
+                val updatedModel = model.updateLayer(layerIndex, updatedConfig)
+                val finalModel = if (isEnabled) updatedModel.setCheckpoint(layerIndex, path) else updatedModel
+                
+                // Persist hyper-parameters
+                finalModel.saveAsDefaults(context)
 
                 val intent = Intent(context, ObjectRemovalActivity::class.java).apply {
                     putExtra("IMAGE_PATH", path)
-                    putExtra("MODEL_CONFIG", updatedModel)
+                    putExtra("MODEL_CONFIG", finalModel)
                 }
                 context.startActivity(intent)
             },

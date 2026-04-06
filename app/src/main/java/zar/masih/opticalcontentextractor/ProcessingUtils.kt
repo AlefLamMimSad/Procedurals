@@ -1,10 +1,17 @@
 package zar.masih.opticalcontentextractor
 
+import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import android.widget.Toast
 import java.io.File
 import java.io.FileOutputStream
+import java.io.OutputStream
 import java.util.*
 import kotlin.math.sqrt
 
@@ -137,7 +144,7 @@ fun applyAnalyticalDewatermarkSync(source: Bitmap, threshold: Int, kernelSize: I
     return result
 }
 
-fun applyGradientExtractionSync(source: Bitmap, amp: Float, threshold: Int): Bitmap {
+fun applyGradientExtractionSync(source: Bitmap, amp: Float, threshold: Int, highlightColor: Int): Bitmap {
     val width = source.width
     val height = source.height
     val pixels = IntArray(width * height)
@@ -163,7 +170,7 @@ fun applyGradientExtractionSync(source: Bitmap, amp: Float, threshold: Int): Bit
             val amplifiedMag = magnitude * amp
             
             if (amplifiedMag > threshold) {
-                outputPixels[idx] = pixels[idx]
+                outputPixels[idx] = highlightColor
             } else {
                 outputPixels[idx] = Color.WHITE
             }
@@ -179,7 +186,6 @@ fun applyVisibilityMaskSync(original: Bitmap, mask: Bitmap, threshold: Int): Bit
     val width = original.width
     val height = original.height
     
-    // Scale mask to original if they differ (should be same ideally)
     val scaledMask = if (mask.width != width || mask.height != height) {
         Bitmap.createScaledBitmap(mask, width, height, true)
     } else mask
@@ -196,8 +202,6 @@ fun applyVisibilityMaskSync(original: Bitmap, mask: Bitmap, threshold: Int): Bit
         val maskColor = maskPixels[i]
         val maskIntensity = (Color.red(maskColor) + Color.green(maskColor) + Color.blue(maskColor)) / 3
         
-        // "This image is black anywhere that the main content is located"
-        // "only the pixels which are valued the darkest; effectively a visibility mask"
         if (maskIntensity < threshold) {
             outputPixels[i] = origPixels[i]
         } else {
@@ -216,4 +220,30 @@ fun saveBitmap(context: Context, bitmap: Bitmap, fileName: String): String {
         bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
     }
     return file.absolutePath
+}
+
+fun exportBitmapToGallery(context: Context, imagePath: String, layerName: String) {
+    val bitmap = BitmapFactory.decodeFile(imagePath) ?: return
+    val fileName = "OCE_${layerName.replace(" ", "_")}_${System.currentTimeMillis()}.png"
+    
+    val outputStream: OutputStream?
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val resolver = context.contentResolver
+        val contentValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+            put(MediaStore.MediaColumns.MIME_TYPE, "image/png")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + File.separator + "OpticalContentExtractor")
+        }
+        val imageUri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+        outputStream = imageUri?.let { resolver.openOutputStream(it) }
+    } else {
+        val imagesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES).toString()
+        val file = File(imagesDir, fileName)
+        outputStream = FileOutputStream(file)
+    }
+
+    outputStream?.use {
+        bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+        Toast.makeText(context, "Saved to Gallery: $fileName", Toast.LENGTH_LONG).show()
+    }
 }

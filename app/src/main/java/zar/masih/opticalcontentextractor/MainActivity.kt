@@ -63,7 +63,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun DocumentScannerScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    var model by remember { mutableStateOf(ModelArchitecture()) }
+    // Load persisted hyperparameter settings as defaults
+    var model by remember { mutableStateOf(ModelArchitecture.loadDefaults(context)) }
     var originalBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var processedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var imagePath by remember { mutableStateOf<String?>(null) }
@@ -95,6 +96,9 @@ fun DocumentScannerScreen(modifier: Modifier = Modifier) {
                     }
                     processedBitmap = proc
                     imagePath = saveBitmapToFile(context, proc)
+                    
+                    val originalPath = saveBitmapToFile(context, it, "checkpoint_layer0.png")
+                    model = model.setCheckpoint(0, originalPath).setCheckpoint(1, imagePath!!)
                 }
             }
         }
@@ -107,7 +111,6 @@ fun DocumentScannerScreen(modifier: Modifier = Modifier) {
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Model Summary for Visualizing Sequential Pipeline
         ModelSummaryHeader(model, currentLayerIndex = 0)
         
         Spacer(modifier = Modifier.height(16.dp))
@@ -170,8 +173,8 @@ fun applyProceduralChain(source: Bitmap, darkThreshold: Int): Bitmap {
     return result
 }
 
-fun saveBitmapToFile(context: android.content.Context, bitmap: Bitmap): String {
-    val file = File(context.cacheDir, "scanned_image.png")
+fun saveBitmapToFile(context: android.content.Context, bitmap: Bitmap, fileName: String = "scanned_image.png"): String {
+    val file = File(context.cacheDir, fileName)
     FileOutputStream(file).use { out ->
         bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
     }
