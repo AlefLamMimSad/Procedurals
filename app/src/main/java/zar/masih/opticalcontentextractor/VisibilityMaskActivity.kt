@@ -18,21 +18,24 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import zar.masih.opticalcontentextractor.ui.theme.OpticalcontentExtractorTheme
 
-class ObjectRemovalActivity : ComponentActivity() {
+class VisibilityMaskActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val imagePath = intent.getStringExtra("IMAGE_PATH")
-        val bitmap = imagePath?.let { BitmapFactory.decodeFile(it) }
+        val maskPath = intent.getStringExtra("IMAGE_PATH")
+        val maskBitmap = maskPath?.let { BitmapFactory.decodeFile(it) }
         val modelConfig = intent.getParcelableExtra<ModelArchitecture>("MODEL_CONFIG") ?: ModelArchitecture()
-        val isFinalStep = intent.getBooleanExtra("IS_FINAL_STEP", false)
+        
+        // Find the original image from the first checkpoint (index 0 or 1)
+        val originalPath = modelConfig.checkpointPaths[0] ?: modelConfig.checkpointPaths[1]
+        val originalBitmap = originalPath?.let { BitmapFactory.decodeFile(it) }
 
         setContent {
             OpticalcontentExtractorTheme {
                 Scaffold { padding ->
-                    if (bitmap != null) {
-                        ObjectRemovalScreen(bitmap, modelConfig, isFinalStep, Modifier.padding(padding))
+                    if (maskBitmap != null && originalBitmap != null) {
+                        VisibilityMaskScreen(originalBitmap, maskBitmap, modelConfig, Modifier.padding(padding))
                     } else {
-                        Text("No image found", modifier = Modifier.padding(padding))
+                        Text("Missing image or mask", modifier = Modifier.padding(padding))
                     }
                 }
             }
@@ -41,19 +44,19 @@ class ObjectRemovalActivity : ComponentActivity() {
 }
 
 @Composable
-fun ObjectRemovalScreen(source: Bitmap, initialModel: ModelArchitecture, isFinalStep: Boolean, modifier: Modifier = Modifier) {
+fun VisibilityMaskScreen(original: Bitmap, mask: Bitmap, initialModel: ModelArchitecture, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     var model by remember { mutableStateOf(initialModel) }
-    val layerIndex = if (isFinalStep) 6 else 3
-    val config = model.getLayer(layerIndex) as LayerConfig.ObjectRemovalLayer
+    val layerIndex = 4
+    val config = model.getLayer(layerIndex) as LayerConfig.VisibilityMaskLayer
     
-    var nToRemove by remember { mutableFloatStateOf(config.nToRemove.toFloat()) }
+    var threshold by remember { mutableFloatStateOf(config.maskThreshold.toFloat()) }
     val processingState by ProcessingEngine.processingState.collectAsState()
 
-    LaunchedEffect(nToRemove) {
-        delay(150) // Debounce
+    LaunchedEffect(threshold) {
+        delay(150)
         ProcessingEngine.requestProcessing(
-            ProcessingEngine.ProcessingTask.ObjectRemoval(source, nToRemove.toInt())
+            ProcessingEngine.ProcessingTask.VisibilityMask(original, mask, threshold.toInt())
         )
     }
 
@@ -66,17 +69,18 @@ fun ObjectRemovalScreen(source: Bitmap, initialModel: ModelArchitecture, isFinal
     ) {
         ModelSummaryHeader(model, currentLayerIndex = layerIndex)
         
-        Text(if (isFinalStep) "Final Object Pruning" else "Intermittent Object Removal", style = MaterialTheme.typography.titleLarge)
+        Text("Visibility Masking", style = MaterialTheme.typography.titleLarge)
+        Text("Using Layer 3 as a mask over Original Image", style = MaterialTheme.typography.bodyMedium)
         
         Spacer(modifier = Modifier.height(16.dp))
 
-        Text("Number of smallest objects to remove: ${nToRemove.toInt()}")
-        Slider(value = nToRemove, onValueChange = { nToRemove = it }, valueRange = 0f..200f)
+        Text("Mask Sensitivity: ${threshold.toInt()}")
+        Slider(value = threshold, onValueChange = { threshold = it }, valueRange = 0f..255f)
 
         Spacer(modifier = Modifier.height(16.dp))
 
         UnifiedPreview(
-            initialBitmap = source,
+            initialBitmap = mask,
             state = processingState
         )
 
@@ -86,25 +90,14 @@ fun ObjectRemovalScreen(source: Bitmap, initialModel: ModelArchitecture, isFinal
             onClick = {
                 val currentBitmap = when (val s = processingState) {
                     is ProcessingEngine.ProcessingState.Success -> s.bitmap
-                    else -> source
+                    else -> mask
                 }
                 
-                val fileName = if (isFinalStep) "checkpoint_layer6.png" else "checkpoint_layer3.png"
-                val path = saveBitmap(context, currentBitmap, fileName)
-                
-                val updatedModel = model.updateLayer(layerIndex, config.copy(nToRemove = nToRemove.toInt()))
+                val path = saveBitmap(context, currentBitmap, "checkpoint_layer4.png")
+                val updatedModel = model.updateLayer(layerIndex, config.copy(maskThreshold = threshold.toInt()))
                                         .setCheckpoint(layerIndex, path)
                 
-                val nextIntent = if (isFinalStep) {
-                    Intent(context, ProcessingActivity::class.java).apply {
-                        flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
-                        putExtra("IS_SUMMARY_MODE", true)
-                    }
-                } else {
-                    Intent(context, VisibilityMaskActivity::class.java)
-                }
-                
-                nextIntent.apply {
+                val nextIntent = Intent(context, GradientExtractionActivity::class.java).apply {
                     putExtra("IMAGE_PATH", path)
                     putExtra("MODEL_CONFIG", updatedModel)
                 }
@@ -112,7 +105,7 @@ fun ObjectRemovalScreen(source: Bitmap, initialModel: ModelArchitecture, isFinal
             },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text(if (isFinalStep) "Confirm & Continue" else "Forward Pass -> Layer 4 (Visibility Mask)")
+            Text("Forward Pass -> Layer 5 (Gradient Extraction)")
         }
     }
 }

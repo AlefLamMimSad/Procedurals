@@ -41,6 +41,9 @@ object ProcessingEngine {
                     is ProcessingTask.GradientExtraction -> {
                         applyGradientExtractionSync(task.input, task.amp, task.threshold)
                     }
+                    is ProcessingTask.VisibilityMask -> {
+                        applyVisibilityMaskSync(task.input, task.mask, task.threshold)
+                    }
                 }
                 _processingState.value = ProcessingState.Success(result)
             }
@@ -55,6 +58,7 @@ object ProcessingEngine {
         class ObjectRemoval(input: Bitmap, val n: Int) : ProcessingTask(input)
         class AnalyticalClean(input: Bitmap, val threshold: Int, val kernelSize: Int) : ProcessingTask(input)
         class GradientExtraction(input: Bitmap, val amp: Float, val threshold: Int) : ProcessingTask(input)
+        class VisibilityMask(val original: Bitmap, val mask: Bitmap, val threshold: Int) : ProcessingTask(original)
     }
 
     sealed class ProcessingState {

@@ -22,6 +22,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import zar.masih.opticalcontentextractor.ui.theme.OpticalcontentExtractorTheme
 
+
+// maintained for legacy reasons
 class RetouchActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -47,6 +49,7 @@ class RetouchActivity : ComponentActivity() {
 fun RetouchScreen(source: Bitmap, model: ModelArchitecture, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val layerIndex = 4
+
     val config = model.getLayer(layerIndex) as LayerConfig.RetouchLayer
     
     val mutableBitmap = remember { source.copy(Bitmap.Config.ARGB_8888, true) }

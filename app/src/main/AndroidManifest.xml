@@ -33,9 +33,9 @@
             android:label="Object Removal"
             android:theme="@style/Theme.OpticalcontentExtractor" />
         <activity
-            android:name=".RetouchActivity"
+            android:name=".VisibilityMaskActivity"
             android:exported="false"
-            android:label="Manual Retouch"
+            android:label="Visibility Masking"
             android:theme="@style/Theme.OpticalcontentExtractor" />
         <activity
             android:name=".GradientExtractionActivity"

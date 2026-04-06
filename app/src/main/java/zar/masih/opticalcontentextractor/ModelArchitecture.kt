@@ -14,7 +14,7 @@ data class ModelArchitecture(
         LayerConfig.NeuralMaskLayer(),
         LayerConfig.AnalyticalCleanLayer(),      // Layer 2
         LayerConfig.ObjectRemovalLayer("Intermittent Object Removal"), // Index 3
-        LayerConfig.RetouchLayer(),              // Layer 4
+        LayerConfig.VisibilityMaskLayer(),       // Layer 4 (Replaced Retouch)
         LayerConfig.GradientExtractLayer(),      // Layer 5
         LayerConfig.ObjectRemovalLayer("Final Object Removal")        // Index 6
     ),
@@ -69,11 +69,10 @@ sealed class LayerConfig : Parcelable {
     ) : LayerConfig()
 
     @Parcelize
-    data class RetouchLayer(
+    data class VisibilityMaskLayer(
         override val isEnabled: Boolean = true,
-        override val layerName: String = "Manual Retouch",
-        val brushSize: Float = 50f,
-        val brushStrength: Int = 255
+        override val layerName: String = "Visibility Masking",
+        val maskThreshold: Int = 128
     ) : LayerConfig()
 
     @Parcelize

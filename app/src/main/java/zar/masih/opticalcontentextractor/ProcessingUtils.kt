@@ -175,6 +175,41 @@ fun applyGradientExtractionSync(source: Bitmap, amp: Float, threshold: Int): Bit
     return result
 }
 
+fun applyVisibilityMaskSync(original: Bitmap, mask: Bitmap, threshold: Int): Bitmap {
+    val width = original.width
+    val height = original.height
+    
+    // Scale mask to original if they differ (should be same ideally)
+    val scaledMask = if (mask.width != width || mask.height != height) {
+        Bitmap.createScaledBitmap(mask, width, height, true)
+    } else mask
+    
+    val origPixels = IntArray(width * height)
+    original.getPixels(origPixels, 0, width, 0, 0, width, height)
+    
+    val maskPixels = IntArray(width * height)
+    scaledMask.getPixels(maskPixels, 0, width, 0, 0, width, height)
+    
+    val outputPixels = IntArray(width * height)
+    
+    for (i in origPixels.indices) {
+        val maskColor = maskPixels[i]
+        val maskIntensity = (Color.red(maskColor) + Color.green(maskColor) + Color.blue(maskColor)) / 3
+        
+        // "This image is black anywhere that the main content is located"
+        // "only the pixels which are valued the darkest; effectively a visibility mask"
+        if (maskIntensity < threshold) {
+            outputPixels[i] = origPixels[i]
+        } else {
+            outputPixels[i] = Color.WHITE
+        }
+    }
+    
+    val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    result.setPixels(outputPixels, 0, width, 0, 0, width, height)
+    return result
+}
+
 fun saveBitmap(context: Context, bitmap: Bitmap, fileName: String): String {
     val file = File(context.cacheDir, fileName)
     FileOutputStream(file).use { out ->
