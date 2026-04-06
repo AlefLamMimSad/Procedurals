@@ -3,7 +3,6 @@ package zar.masih.opticalcontentextractor
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Rect
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -15,8 +14,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -26,8 +23,6 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.google.mlkit.vision.common.InputImage
@@ -120,7 +115,7 @@ fun InpaintScreen(source: Bitmap, initialModel: ModelArchitecture, modifier: Mod
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Fill Color Selection", modifier = Modifier.weight(1f))
                 Button(onClick = { detectText() }, enabled = !isDetectingText) {
-                    if (isDetectingText) CircularProgressIndicator(size = 16.dp, color = Color.White)
+                    if (isDetectingText) CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
                     else Text("Detect Text")
                 }
             }
@@ -142,13 +137,6 @@ fun InpaintScreen(source: Bitmap, initialModel: ModelArchitecture, modifier: Mod
 
         // Preview with Text Overlay
         Box(modifier = Modifier.fillMaxWidth().height(400.dp)) {
-            val currentBitmap = if (isEnabled) {
-                when (val s = processingState) {
-                    is ProcessingEngine.ProcessingState.Success -> s.bitmap
-                    else -> source
-                }
-            } else source
-
             UnifiedPreview(
                 initialBitmap = source,
                 state = if (isEnabled) processingState else ProcessingEngine.ProcessingState.Idle
